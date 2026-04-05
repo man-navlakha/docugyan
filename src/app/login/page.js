@@ -4,13 +4,20 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import BrandLogo from "@/components/BrandLogo";
+import {
+  LOCAL_STORAGE_KEYS,
+  fetchAccessToken,
+  googleLogin,
+  loginSignUp,
+  resendOtp,
+  verifyOtp,
+} from "@/lib/api/docuApi";
 
-function getErrorMessage(payload, fallback) {
-  if (!payload || typeof payload !== "object") {
-    return fallback;
+function getMessage(error, fallback) {
+  if (error && typeof error.message === "string") {
+    return error.message;
   }
-
-  return payload.message ?? payload.error ?? payload.detail ?? fallback;
+  return fallback;
 }
 
 export default function LoginPage() {
@@ -23,7 +30,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [targetPath, setTargetPath] = useState("/dashboard");
+  const [targetPath, setTargetPath] = useState("/dashboard/chat");
   const router = useRouter();
 
   useEffect(() => {
@@ -34,41 +41,44 @@ export default function LoginPage() {
     }
   }, []);
 
-  const handleStart = async (e) => {
-    e.preventDefault();
+  const persistSessionState = async (userUuid) => {
+    if (userUuid) {
+      window.localStorage.setItem(LOCAL_STORAGE_KEYS.userUuid, userUuid);
+    }
+
+    try {
+      const tokenPayload = await fetchAccessToken();
+      if (tokenPayload?.access_token) {
+        window.localStorage.setItem(LOCAL_STORAGE_KEYS.accessToken, tokenPayload.access_token);
+      }
+    } catch {
+      window.localStorage.removeItem(LOCAL_STORAGE_KEYS.accessToken);
+    }
+  };
+
+  const handleStart = async (event) => {
+    event.preventDefault();
     setLoading(true);
     setError("");
     setStatusMessage("");
 
     try {
-      const response = await fetch("/api/auth/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-
-      const payload = await response.json();
-
-      if (!response.ok) {
-        setError(getErrorMessage(payload, "Failed to send OTP."));
-        return;
-      }
-
+      const payload = await loginSignUp(email.trim());
       setAuthSession({
         id: payload.id,
         key: payload.key,
         status: payload.status,
       });
       setStatusMessage(`OTP sent. ${payload.status ?? ""}`.trim());
-    } catch {
-      setError("Unable to connect to auth service.");
+    } catch (requestError) {
+      setError(getMessage(requestError, "Failed to send OTP."));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleVerify = async (e) => {
-    e.preventDefault();
+  const handleVerify = async (event) => {
+    event.preventDefault();
     if (!authSession?.id) {
       setError("Start login first.");
       return;
@@ -79,22 +89,12 @@ export default function LoginPage() {
     setStatusMessage("");
 
     try {
-      const response = await fetch("/api/auth/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: authSession.id, otp: otp.trim() }),
-      });
-      const payload = await response.json();
-
-      if (!response.ok) {
-        setError(getErrorMessage(payload, "OTP verification failed."));
-        return;
-      }
-
+      const payload = await verifyOtp(authSession.id, otp.trim());
+      await persistSessionState(payload?.user_uuid);
       setStatusMessage(payload.message ?? "OTP verified.");
       router.push(targetPath);
-    } catch {
-      setError("Unable to verify OTP.");
+    } catch (requestError) {
+      setError(getMessage(requestError, "OTP verification failed."));
     } finally {
       setLoading(false);
     }
@@ -110,18 +110,7 @@ export default function LoginPage() {
     setStatusMessage("");
 
     try {
-      const response = await fetch("/api/auth/resend", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: authSession.id, key: authSession.key }),
-      });
-      const payload = await response.json();
-
-      if (!response.ok) {
-        setError(getErrorMessage(payload, "Failed to resend OTP."));
-        return;
-      }
-
+      const payload = await resendOtp(authSession.id, authSession.key);
       setAuthSession((current) =>
         current
           ? {
@@ -131,36 +120,26 @@ export default function LoginPage() {
           : current
       );
       setStatusMessage("A new OTP has been sent.");
-    } catch {
-      setError("Unable to resend OTP.");
+    } catch (requestError) {
+      setError(getMessage(requestError, "Failed to resend OTP."));
     } finally {
       setResending(false);
     }
   };
 
-  const handleGoogleLogin = async (e) => {
-    e.preventDefault();
+  const handleGoogleLogin = async (event) => {
+    event.preventDefault();
     setGoogleLoading(true);
     setError("");
     setStatusMessage("");
 
     try {
-      const response = await fetch("/api/auth/google", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: googleToken.trim() }),
-      });
-      const payload = await response.json();
-
-      if (!response.ok) {
-        setError(getErrorMessage(payload, "Google login failed."));
-        return;
-      }
-
+      const payload = await googleLogin(googleToken.trim());
+      await persistSessionState(payload?.user_uuid);
       setStatusMessage(payload.message ?? "Google login successful.");
       router.push(targetPath);
-    } catch {
-      setError("Unable to complete Google login.");
+    } catch (requestError) {
+      setError(getMessage(requestError, "Google login failed."));
     } finally {
       setGoogleLoading(false);
     }
@@ -189,7 +168,7 @@ export default function LoginPage() {
                 type="email"
                 id="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(event) => setEmail(event.target.value)}
                 required
                 className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-2.5 text-white outline-none placeholder:text-slate-500 focus:border-violet-400"
                 placeholder="you@example.com"
@@ -217,7 +196,7 @@ export default function LoginPage() {
                 type="text"
                 id="otp"
                 value={otp}
-                onChange={(e) => setOtp(e.target.value)}
+                onChange={(event) => setOtp(event.target.value)}
                 required
                 className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-2.5 text-white outline-none placeholder:text-slate-500 focus:border-blue-400"
                 placeholder="Enter 6-digit OTP"
@@ -267,7 +246,7 @@ export default function LoginPage() {
               type="text"
               id="google-token"
               value={googleToken}
-              onChange={(e) => setGoogleToken(e.target.value)}
+              onChange={(event) => setGoogleToken(event.target.value)}
               required
               className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-2.5 text-white outline-none placeholder:text-slate-500 focus:border-violet-400"
               placeholder="Paste Google ID token"

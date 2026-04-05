@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import BrandLogo from '@/components/BrandLogo';
+import { LOCAL_STORAGE_KEYS, clearStoredProcessState } from '@/lib/api/docuApi';
 
 const navItems = [
   { label: 'Dashboard', href: '/dashboard' },
@@ -36,6 +37,9 @@ export default function TopNavbar() {
       await fetch('/api/auth/logout', {
         method: 'POST',
       });
+      clearStoredProcessState();
+      window.localStorage.removeItem(LOCAL_STORAGE_KEYS.userUuid);
+      window.localStorage.removeItem(LOCAL_STORAGE_KEYS.accessToken);
     } finally {
       router.push('/login');
       router.refresh();
