@@ -5,9 +5,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   LOCAL_STORAGE_KEYS,
   ApiError,
-  buildProcessWebSocketUrl,
   clearStoredProcessState,
   fetchAccessToken,
+  fetchWsToken,
   googleLogin,
   initDocuProcess,
   loginSignUp,
@@ -15,6 +15,7 @@ import {
   uploadFileToBlob,
   verifyOtp,
 } from "@/lib/api/docuApi";
+import { closeProcessSocket, connectProcessSocket } from "@/lib/realtime/processSocketClient";
 
 const stepLabels = [
   "Step 1 · Login",
@@ -54,7 +55,7 @@ function createEventLine(type, text, data = null) {
 }
 
 export default function ChatPage() {
-  const wsRef = useRef(null);
+  const isMountedRef = useRef(true);
   const [currentStep, setCurrentStep] = useState(1);
 
   const [email, setEmail] = useState("");
@@ -125,10 +126,7 @@ export default function ChatPage() {
 
   useEffect(
     () => () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
+      isMountedRef.current = false;
     },
     []
   );
@@ -179,61 +177,68 @@ export default function ChatPage() {
     setCurrentStep(3);
   };
 
-  const openProgressSocket = (activeProjectId, token) => {
-    if (!activeProjectId || !token) {
-      setProcessError("Processing started, but WebSocket token is missing. Re-authenticate and retry live stream.");
-      return;
+  const openProgressSocket = async (activeProjectId) => {
+    if (!activeProjectId) {
+      throw new Error("Project is missing for WebSocket connection.");
     }
 
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
+    await connectProcessSocket({
+      projectId: activeProjectId,
+      wsTokenProvider: async () => {
+        const wsTokenPayload = await fetchWsToken();
+        const wsToken = wsTokenPayload?.access_token?.trim();
 
-    const wsUrl = buildProcessWebSocketUrl(activeProjectId, token);
-    const socket = new WebSocket(wsUrl);
-    wsRef.current = socket;
+        if (!wsToken) {
+          throw new Error("Failed to get WebSocket token.");
+        }
 
-    socket.onopen = () => {
-      setTimeline((current) => [...current, createEventLine("message", "WebSocket connected.")]);
-    };
+        if (isMountedRef.current) {
+          setAccessToken(wsToken);
+          window.localStorage.setItem(LOCAL_STORAGE_KEYS.accessToken, wsToken);
+        }
 
-    socket.onmessage = (event) => {
-      let payload;
-      try {
-        payload = JSON.parse(event.data);
-      } catch {
-        setTimeline((current) => [...current, createEventLine("error", "Received non-JSON WebSocket event.")]);
-        return;
-      }
+        return { access_token: wsToken };
+      },
+      onEvent: (event) => {
+        if (!isMountedRef.current || !event) {
+          return;
+        }
 
-      const eventType = payload?.event_type ?? "message";
-      const data = payload?.data ?? {};
-      const text = data?.text ?? "";
+        if (event.type === "message") {
+          setTimeline((current) => [...current, createEventLine("message", event.text || "Socket update")]);
+          return;
+        }
 
-      if (eventType === "completed") {
-        setFinalResult(data?.result ?? data);
-        setTimeline((current) => [...current, createEventLine("completed", "Processing completed.", data?.result ?? data)]);
-        return;
-      }
+        if (event.type === "error") {
+          setTimeline((current) => [...current, createEventLine("error", event.text || "WebSocket error occurred.")]);
+          return;
+        }
 
-      if (eventType === "error") {
-        const message = text || data?.message || "Processing failed.";
-        setProcessError(message);
-        setTimeline((current) => [...current, createEventLine("error", message, data)]);
-        return;
-      }
+        if (event.type !== "payload") {
+          return;
+        }
 
-      setTimeline((current) => [...current, createEventLine(eventType, text || JSON.stringify(data), data)]);
-    };
+        const payload = event.payload ?? {};
+        const eventType = payload?.event_type ?? "message";
+        const data = payload?.data ?? {};
+        const text = data?.text ?? payload?.message ?? "";
 
-    socket.onerror = () => {
-      setTimeline((current) => [...current, createEventLine("error", "WebSocket error occurred.")]);
-    };
+        if (eventType === "completed") {
+          setFinalResult(data?.result ?? data);
+          setTimeline((current) => [...current, createEventLine("completed", "Processing completed.", data?.result ?? data)]);
+          return;
+        }
 
-    socket.onclose = () => {
-      setTimeline((current) => [...current, createEventLine("message", "WebSocket disconnected.")]);
-    };
+        if (eventType === "error") {
+          const message = text || data?.message || "Processing failed.";
+          setProcessError(message);
+          setTimeline((current) => [...current, createEventLine("error", message, data)]);
+          return;
+        }
+
+        setTimeline((current) => [...current, createEventLine(eventType, text || JSON.stringify(data), data)]);
+      },
+    });
   };
 
   const handleSendOtp = async (event) => {
@@ -355,7 +360,7 @@ export default function ChatPage() {
     try {
       const folder = `${blobCollection || "docu-input"}/${target}`;
       const uploadResults = await Promise.all(Array.from(files).map((file) => uploadFileToBlob(file, folder)));
-      const uploadedUrls = uploadResults.map((item) => item.url).filter(Boolean);
+      const uploadedUrls = uploadResults.map((item) => item.blob_url || item.url).filter(Boolean);
       setUrls((current) => [...current, ...uploadedUrls.filter((url) => !current.includes(url))]);
     } catch (error) {
       setUploadError(toErrorMessage(error, "Failed to upload one or more files."));
@@ -376,9 +381,10 @@ export default function ChatPage() {
     setFinalResult(null);
 
     try {
+      await openProgressSocket(projectId);
+
       const payload = await startDocuProcess({
         project_id: projectId,
-        user_uuid: userUuid,
         reference_urls: referenceUrls,
         question_urls: questionUrls,
       });
@@ -390,8 +396,6 @@ export default function ChatPage() {
       }
 
       setCurrentStep(5);
-      const token = accessToken || (await syncAccessToken());
-      openProgressSocket(projectId, token);
     } catch (error) {
       setProcessError(toErrorMessage(error, "Failed to start processing."));
     } finally {
@@ -409,7 +413,7 @@ export default function ChatPage() {
     setProcessError("");
 
     try {
-      const payload = await initDocuProcess(userUuid);
+      const payload = await initDocuProcess();
       setProjectId(payload.project_id);
       setBlobCollection(payload.blob_collection);
       setTaskId("");
@@ -420,11 +424,7 @@ export default function ChatPage() {
       window.localStorage.setItem(LOCAL_STORAGE_KEYS.projectId, payload.project_id);
       window.localStorage.setItem(LOCAL_STORAGE_KEYS.blobCollection, payload.blob_collection);
       window.localStorage.removeItem(LOCAL_STORAGE_KEYS.taskId);
-
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
+      closeProcessSocket();
     } catch (error) {
       setProcessError(toErrorMessage(error, "Failed to restart processing."));
     } finally {
@@ -652,6 +652,7 @@ export default function ChatPage() {
               setReferenceUrls([]);
               setQuestionUrls([]);
               setCurrentStep(userUuid ? 3 : 1);
+              closeProcessSocket();
             }}
             className="rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-slate-300"
           >
@@ -664,7 +665,7 @@ export default function ChatPage() {
           <p>
             ws endpoint:{" "}
             <span className="text-xs text-slate-400">
-              {projectId ? buildProcessWebSocketUrl(projectId, accessToken || "token") : "Initialize project first"}
+              {projectId ? `ws://.../ws/agent/process/${projectId}/?token=***` : "Initialize project first"}
             </span>
           </p>
         </div>

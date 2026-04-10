@@ -2,7 +2,8 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { LOCAL_STORAGE_KEYS } from "@/lib/api/docuApi";
+import { LOCAL_STORAGE_KEYS, fetchWsToken } from "@/lib/api/docuApi";
+import { connectProcessSocket } from "@/lib/realtime/processSocketClient";
 
 export default function DocuAgentPage() {
   const router = useRouter();
@@ -132,16 +133,12 @@ export default function DocuAgentPage() {
     setError("");
 
     try {
-      const userUuid = window.localStorage.getItem(LOCAL_STORAGE_KEYS.userUuid);
-      if (!userUuid) throw new Error("User session not found. Please log in again.");
-
       // STEP 1: INITIALIZE & GET COLLECTION DIRECTORY
       setStatusText("Initializing workspace...");
       const initRes = await fetch("/api/agent/init-docu-process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          user_uuid: userUuid,
           text: processTitle.trim() || "Untitled Workspace",
           description: processDescription.trim() || ""
         }),
@@ -149,7 +146,7 @@ export default function DocuAgentPage() {
       
       if (!initRes.ok) {
          const errData = await initRes.json().catch(() => ({}));
-         throw new Error(errData.error || "Failed to initialize project.");
+        throw new Error(errData.message || errData.error || errData.detail || "Failed to initialize project.");
       }
       
       const { project_id, blob_collection } = await initRes.json();
@@ -174,11 +171,18 @@ export default function DocuAgentPage() {
         }
         
         const data = await res.json();
-        return data.url; 
+        return data.blob_url || data.url; 
       };
 
       const reference_urls = await Promise.all(finalRefFiles.map(uploadFile));
       const question_urls = await Promise.all(finalQuestionFiles.map(uploadFile));
+      const sanitizedReferenceUrls = reference_urls.flat(Infinity).filter((item) => typeof item === "string" && item.trim());
+      const sanitizedQuestionUrls = question_urls.flat(Infinity).filter((item) => typeof item === "string" && item.trim());
+
+      await connectProcessSocket({
+        projectId: project_id,
+        wsTokenProvider: fetchWsToken,
+      });
 
       // STEP 3: PROCESS AGENT
       setStatusText("Awakening AI Agents...");
@@ -187,22 +191,17 @@ export default function DocuAgentPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_id,
-          user_uuid: userUuid,
-          reference_urls,
-          question_urls,
+          reference_urls: sanitizedReferenceUrls,
+          question_urls: sanitizedQuestionUrls[0] || "",
         }),
       });
 
       if (!processRes.ok) {
          const errData = await processRes.json().catch(() => ({}));
-         throw new Error(errData.error || "Failed to start AI processing.");
+        throw new Error(errData.message || errData.error || errData.detail || "Failed to start AI processing.");
       }
 
       setStatusText("DocuAgent Activated! Redirecting...");
-      
-      // Save URLs temporarily so the chat page can render them immediately in the sidebar
-      sessionStorage.setItem(`session_refs_${project_id}`, JSON.stringify(reference_urls));
-      sessionStorage.setItem(`session_qs_${project_id}`, JSON.stringify(question_urls));
 
       setTimeout(() => {
         setShowModal(false);
