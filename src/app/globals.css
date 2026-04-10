@@ -67,3 +67,12 @@ a {
   background: rgba(255, 255, 255, 0.18);
   border-radius: 999px;
 }
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
