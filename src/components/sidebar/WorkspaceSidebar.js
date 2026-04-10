@@ -1,18 +1,63 @@
 'use client';
 
+function normalizeUrlString(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const listMatch = trimmed.match(/^\[\s*['\"](.+?)['\"]\s*\]$/);
+  const unwrapped = listMatch ? listMatch[1] : trimmed;
+
+  if (/^https?:\/(?!\/)/i.test(unwrapped)) {
+    return unwrapped.replace(/^https?:\/(?!\/)/i, (prefix) => `${prefix}/`);
+  }
+
+  return unwrapped;
+}
+
 function resolveSourceUrl(url) {
+  const normalizedInput = normalizeUrlString(url);
+  if (!normalizedInput) {
+    return '';
+  }
+
   try {
-    const parsed = new URL(url, window.location.origin);
+    const parsed = new URL(normalizedInput, window.location.origin);
     const looksLikeProxyPath = parsed.pathname.endsWith('/api/uploads/blob') || parsed.pathname.endsWith('/blob');
     const nested = parsed.searchParams.get('url');
 
     if (looksLikeProxyPath && nested) {
-      return nested;
+      return normalizeUrlString(nested);
     }
     return parsed.toString();
   } catch {
-    return url;
+    return normalizedInput;
   }
+}
+
+function buildPreviewUrl(url) {
+  const resolved = resolveSourceUrl(url);
+  if (!resolved) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(resolved, window.location.origin);
+    if (parsed.hostname.endsWith('.blob.vercel-storage.com')) {
+      const proxyUrl = new URL('/api/uploads/blob', window.location.origin);
+      proxyUrl.searchParams.set('url', parsed.toString());
+      return proxyUrl.toString();
+    }
+  } catch {
+    // Fall back to the original URL if parsing fails.
+  }
+
+  return resolved;
 }
 
 function stripRandomSuffix(baseName) {
@@ -92,25 +137,33 @@ function OpenInNewTabIcon() {
 
 export default function WorkspaceSidebar({
   projectId,
-  resultUrls = [],
   referenceUrls = [],
   questionUrls = [],
-  finalAnswerUrl = '',
+  resultUrls = [],
   activeFile,
   onFileSelect,
 }) {
-  const totalDocuments = resultUrls.length + referenceUrls.length + questionUrls.length + (finalAnswerUrl ? 1 : 0);
+  const safeResultUrls = Array.isArray(resultUrls) ? resultUrls : (typeof resultUrls === 'string' && resultUrls.trim() ? [resultUrls] : []);
+  const finalAnswerUrl = safeResultUrls[0] || '';
+  const safeReferenceUrls = Array.isArray(referenceUrls) ? referenceUrls : (typeof referenceUrls === 'string' && referenceUrls.trim() ? [referenceUrls] : []);
+  const safeQuestionUrls = Array.isArray(questionUrls) ? questionUrls : (typeof questionUrls === 'string' && questionUrls.trim() ? [questionUrls] : []);
+  const totalDocuments = safeResultUrls.length + safeReferenceUrls.length + safeQuestionUrls.length;
   const activeFileName = activeFile ? extractFileParts(activeFile).displayName : '';
 
   const renderFileItem = (url, label, key) => {
-    const isActive = activeFile === url;
+    const previewUrl = buildPreviewUrl(url);
+    if (!previewUrl) {
+      return null;
+    }
+
+    const isActive = activeFile === previewUrl || activeFile === url;
     const fileInfo = extractFileParts(url);
     const typeLabel = getTypeLabel(fileInfo.extension);
 
     return (
       <button
         key={key}
-        onClick={() => onFileSelect(url)}
+        onClick={() => onFileSelect(previewUrl)}
         className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all ${
           isActive ? 'border border-violet-500/30 bg-violet-500/15 shadow-sm' : 'border border-transparent hover:bg-white/5'
         }`}
@@ -127,7 +180,7 @@ export default function WorkspaceSidebar({
         </div>
 
         <a
-          href={url}
+          href={previewUrl}
           target="_blank"
           rel="noreferrer"
           onClick={(event) => event.stopPropagation()}
@@ -165,24 +218,17 @@ export default function WorkspaceSidebar({
           </section>
         )}
 
-        {resultUrls.length > 0 && (
-          <section>
-            <h3 className="mb-3 px-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Results</h3>
-            <div className="space-y-1">{resultUrls.map((url, i) => renderFileItem(url, 'Generated Output', `result-${i}`))}</div>
-          </section>
-        )}
-
-        {referenceUrls.length > 0 && (
+        {safeReferenceUrls.length > 0 && (
           <section>
             <h3 className="mb-3 px-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Reference Materials</h3>
-            <div className="space-y-1">{referenceUrls.map((url, i) => renderFileItem(url, 'Knowledge Source', `ref-${i}`))}</div>
+            <div className="space-y-1">{safeReferenceUrls.map((url, i) => renderFileItem(url, 'Knowledge Source', `ref-${i}`))}</div>
           </section>
         )}
 
-        {questionUrls.length > 0 && (
+        {safeQuestionUrls.length > 0 && (
           <section>
             <h3 className="mb-3 px-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Questions</h3>
-            <div className="space-y-1">{questionUrls.map((url, i) => renderFileItem(url, 'Query File', `q-${i}`))}</div>
+            <div className="space-y-1">{safeQuestionUrls.map((url, i) => renderFileItem(url, 'Query File', `q-${i}`))}</div>
           </section>
         )}
       </div>

@@ -1,7 +1,9 @@
 import { buildBackendUrl, getRequestAuthHeaders, readJsonSafe } from "@/lib/auth/backend";
 
-async function requestWsToken(request) {
-  return fetch(buildBackendUrl("/core/ws-token/"), {
+const WS_TOKEN_PATHS = ["/core/ws-token/", "/api/core/ws-token/"];
+
+async function requestWsToken(request, path) {
+  return fetch(buildBackendUrl(path), {
     method: "GET",
     headers: {
       ...getRequestAuthHeaders(request),
@@ -22,13 +24,19 @@ async function refreshAuth(request) {
 
 export async function GET(request) {
   try {
-    let backendResponse = await requestWsToken(request);
+    let usedPath = WS_TOKEN_PATHS[0];
+    let backendResponse = await requestWsToken(request, usedPath);
+
+    if (backendResponse.status === 404) {
+      usedPath = WS_TOKEN_PATHS[1];
+      backendResponse = await requestWsToken(request, usedPath);
+    }
 
     if (backendResponse.status === 401 || backendResponse.status === 403) {
       const refreshResponse = await refreshAuth(request);
 
       if (refreshResponse.ok) {
-        backendResponse = await requestWsToken(request);
+        backendResponse = await requestWsToken(request, usedPath);
       }
     }
 

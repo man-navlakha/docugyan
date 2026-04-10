@@ -251,7 +251,7 @@ export async function fetchAccessToken() {
 
 export async function fetchWsToken() {
   return requestJson(
-    "/api/core/ws-token",
+    "/api/core/ws-token/",
     {
       method: "GET",
       credentials: "include",

@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ReactFlow, { Background, Controls, Handle, MarkerType, Position } from "reactflow";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import "reactflow/dist/style.css";
 import { fetchDocuProcessData } from "@/lib/api/docuApi";
 import { useAgentWebSocket } from "@/lib/realtime/useAgentWebSocket";
@@ -160,6 +162,90 @@ function toMessage(error, fallback) {
   return fallback;
 }
 
+function normalizeUrlString(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  let trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    trimmed = trimmed.slice(1, -1).trim();
+  }
+
+  if ((trimmed.startsWith("\"") && trimmed.endsWith("\"")) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    trimmed = trimmed.slice(1, -1).trim();
+  }
+
+  trimmed = trimmed.replace(/[\]\"']+$/g, "").trim();
+
+  if (/^https?:\/(?!\/)/i.test(trimmed)) {
+    return trimmed.replace(/^https?:\/(?!\/)/i, (prefix) => `${prefix}/`);
+  }
+
+  return trimmed;
+}
+
+function resolveSourceUrl(url) {
+  const normalizedInput = normalizeUrlString(url);
+  if (!normalizedInput) {
+    return "";
+  }
+
+  try {
+    const isAbsolute = /^https?:\/\//i.test(normalizedInput);
+    const parsed = new URL(normalizedInput, isAbsolute ? undefined : "http://local.preview");
+    const isBlobProxy = parsed.pathname.endsWith("/api/uploads/blob") || parsed.pathname.endsWith("/blob");
+    const nested = parsed.searchParams.get("url");
+
+    if (isBlobProxy && nested) {
+      return normalizeUrlString(nested);
+    }
+
+    if (isAbsolute) {
+      return parsed.toString();
+    }
+
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return normalizedInput;
+  }
+}
+
+function isMarkdownUrl(url) {
+  const source = resolveSourceUrl(url);
+  if (!source) {
+    return false;
+  }
+
+  return /\.md(?:$|[?#])/i.test(source);
+}
+
+function buildPreviewUrl(url) {
+  const resolved = resolveSourceUrl(url);
+  if (!resolved) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(resolved, /^https?:\/\//i.test(resolved) ? undefined : "http://local.preview");
+    if (parsed.hostname.endsWith(".blob.vercel-storage.com")) {
+      return `/api/uploads/blob?url=${encodeURIComponent(parsed.toString())}`;
+    }
+
+    if (resolved.startsWith("/")) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {
+    // Use resolved URL fallback.
+  }
+
+  return resolved;
+}
+
 function mapLogToActiveNodes(message, eventType) {
   const normalizedType = (eventType || "").toLowerCase();
   if (normalizedType === "completed") {
@@ -212,6 +298,41 @@ function firstNonEmptyString(values, fallback = "") {
   return fallback;
 }
 
+function areStringArraysEqual(a, b) {
+  if (a === b) {
+    return true;
+  }
+
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+    return false;
+  }
+
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function mergeUniqueNodes(previous, additions) {
+  return Array.from(new Set([...(Array.isArray(previous) ? previous : []), ...(Array.isArray(additions) ? additions : [])]));
+}
+
+function getGraphStateStorageKey(projectId) {
+  return `docugyan-workspace-graph-state:${projectId}`;
+}
+
+function sanitizeNodeIdList(value, fallback = []) {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+
+  const normalized = value.filter((item) => typeof item === "string" && item.trim());
+  return normalized.length > 0 ? Array.from(new Set(normalized)) : fallback;
+}
+
 function isObject(value) {
   return Boolean(value) && typeof value === "object";
 }
@@ -257,11 +378,22 @@ function readUrlList(container, keys) {
 
   for (const key of keys) {
     const value = container[key];
+
+    if (typeof value === "string" && value.trim()) {
+      const normalizedValue = normalizeUrlString(value);
+      if (normalizedValue) {
+        return [normalizedValue];
+      }
+    }
+
     if (!Array.isArray(value)) {
       continue;
     }
 
-    const normalized = value.filter((item) => typeof item === "string" && item.trim());
+    const normalized = value
+      .filter((item) => typeof item === "string")
+      .map((item) => normalizeUrlString(item))
+      .filter(Boolean);
     if (normalized.length > 0) {
       return normalized;
     }
@@ -323,9 +455,9 @@ function normalizeProcessData(payload) {
     ""
   );
 
-  const resultUrls = findUrlListByKeys(objects, ["result_urls", "resultUrls", "results", "output_urls"]);
-  const referenceUrls = findUrlListByKeys(objects, ["reference_urls", "referenceUrls", "references"]);
-  const questionUrls = findUrlListByKeys(objects, ["question_urls", "questionUrls", "questions"]);
+  const resultUrls = findUrlListByKeys(objects, ["result_urls", "resultUrls", "result_url", "results", "output_urls", "output_url"]);
+  const referenceUrls = findUrlListByKeys(objects, ["reference_urls", "referenceUrls", "reference_url", "references"]);
+  const questionUrls = findUrlListByKeys(objects, ["question_urls", "questionUrls", "question_url", "questions"]);
 
   return {
     ...root,
@@ -340,22 +472,26 @@ function normalizeProcessData(payload) {
 }
 
 function PipelineNode({ data }) {
-  const active = Boolean(data?.active);
+  const nodeState = data?.nodeState || "idle";
+  const isFailed = nodeState === "failed";
+  const isActive = nodeState === "active";
 
   return (
     <div
       className={`w-[220px] rounded-2xl border px-4 py-3 backdrop-blur-xl transition-all duration-300 ${
-        active
+        isFailed
+          ? "border-red-400/80 bg-red-500/15 ring-1 ring-red-300/70 shadow-[0_0_34px_rgba(248,113,113,0.45)] node-failed-glow"
+          : isActive
           ? "border-violet-400/80 bg-violet-500/15 ring-1 ring-violet-300/70 shadow-[0_0_34px_rgba(139,92,246,0.45)] node-active-glow"
           : "border-white/15 bg-white/[0.04]"
       }`}
     >
       <p className="text-sm font-semibold text-white">{data.label}</p>
       <p className="mt-1 text-[11px] uppercase tracking-widest text-slate-400">{data.subtitle}</p>
-      {active && (
-        <span className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-violet-200">
-          <span className="h-1.5 w-1.5 rounded-full bg-violet-300 animate-pulse" />
-          Active
+      {(isActive || isFailed) && (
+        <span className={`mt-2 inline-flex items-center gap-1 text-[11px] font-semibold ${isFailed ? "text-red-200" : "text-violet-200"}`}>
+          <span className={`h-1.5 w-1.5 rounded-full animate-pulse ${isFailed ? "bg-red-300" : "bg-violet-300"}`} />
+          {isFailed ? "Failed" : "Active"}
         </span>
       )}
 
@@ -372,11 +508,17 @@ export default function WorkspacePage() {
   const projectId = searchParams.get("project") || "";
 
   const [activeView, setActiveView] = useState("graph");
-  const [activeNodeIds, setActiveNodeIds] = useState(["START"]);
+  const [currentNodeIds, setCurrentNodeIds] = useState(["START"]);
+  const [visitedNodeIds, setVisitedNodeIds] = useState(["START"]);
+  const [failedNodeIds, setFailedNodeIds] = useState([]);
+  const currentNodeIdsRef = useRef(["START"]);
   const [processData, setProcessData] = useState(null);
   const [loadingData, setLoadingData] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [activeDocumentUrl, setActiveDocumentUrl] = useState("");
+  const [markdownContent, setMarkdownContent] = useState("");
+  const [markdownLoading, setMarkdownLoading] = useState(false);
+  const [markdownError, setMarkdownError] = useState("");
 
   const { connectionState, logs, status, lastEventType, finalAnswerUrl } = useAgentWebSocket(projectId, {
     enabled: Boolean(projectId),
@@ -435,8 +577,80 @@ export default function WorkspacePage() {
   }, [processData?.status, status]);
 
   useEffect(() => {
-    setActiveNodeIds(["START"]);
+    const completionStatus = (status || processData?.status || lastEventType || "").toString().toLowerCase();
+    const isCompleted =
+      completionStatus.includes("complete") || completionStatus.includes("completed") || completionStatus.includes("done") || completionStatus.includes("success");
+
+    const liveFinalAnswerUrl = resolveSourceUrl(finalAnswerUrl || processData?.final_answer_url || "");
+    if (!isCompleted || !liveFinalAnswerUrl) {
+      return;
+    }
+
+    setActiveView("document");
+    setActiveDocumentUrl((prev) => {
+      const normalizedPrev = resolveSourceUrl(prev);
+      return normalizedPrev === liveFinalAnswerUrl ? prev : liveFinalAnswerUrl;
+    });
+  }, [finalAnswerUrl, lastEventType, processData?.final_answer_url, processData?.status, status]);
+
+  useEffect(() => {
+    if (!projectId || typeof window === "undefined") {
+      setCurrentNodeIds(["START"]);
+      setVisitedNodeIds(["START"]);
+      setFailedNodeIds([]);
+      currentNodeIdsRef.current = ["START"];
+      return;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(getGraphStateStorageKey(projectId));
+      if (!raw) {
+        setCurrentNodeIds(["START"]);
+        setVisitedNodeIds(["START"]);
+        setFailedNodeIds([]);
+        currentNodeIdsRef.current = ["START"];
+        return;
+      }
+
+      const parsed = JSON.parse(raw);
+      const restoredCurrent = sanitizeNodeIdList(parsed?.currentNodeIds, ["START"]);
+      const restoredVisited = sanitizeNodeIdList(parsed?.visitedNodeIds, ["START"]);
+      const restoredFailed = sanitizeNodeIdList(parsed?.failedNodeIds, []);
+
+      setCurrentNodeIds(restoredCurrent);
+      setVisitedNodeIds(restoredVisited);
+      setFailedNodeIds(restoredFailed);
+      currentNodeIdsRef.current = restoredCurrent;
+    } catch {
+      setCurrentNodeIds(["START"]);
+      setVisitedNodeIds(["START"]);
+      setFailedNodeIds([]);
+      currentNodeIdsRef.current = ["START"];
+    }
   }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId || typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      const snapshot = {
+        currentNodeIds,
+        visitedNodeIds,
+        failedNodeIds,
+        savedAt: Date.now(),
+      };
+
+      window.localStorage.setItem(getGraphStateStorageKey(projectId), JSON.stringify(snapshot));
+    } catch {
+      // Ignore persistence failures (private mode/quota).
+    }
+  }, [currentNodeIds, failedNodeIds, projectId, visitedNodeIds]);
+
+  useEffect(() => {
+    currentNodeIdsRef.current = currentNodeIds;
+  }, [currentNodeIds]);
 
   useEffect(() => {
     if (logs.length === 0 && lastEventType !== "completed") {
@@ -444,20 +658,83 @@ export default function WorkspacePage() {
     }
 
     if (lastEventType === "completed") {
-      setActiveNodeIds(["END"]);
+      setCurrentNodeIds((prev) => (areStringArraysEqual(prev, ["END"]) ? prev : ["END"]));
+      setVisitedNodeIds((prev) => mergeUniqueNodes(prev, ["END"]));
       return;
     }
 
     const latestLog = logs[logs.length - 1];
     const mappedNodeIds = mapLogToActiveNodes(latestLog?.message || "", latestLog?.type || lastEventType);
+    const normalizedEventType = (latestLog?.type || lastEventType || status || "").toString().toLowerCase();
+    const isFailureEvent = normalizedEventType.includes("failed") || normalizedEventType.includes("error");
 
     if (mappedNodeIds && mappedNodeIds.length > 0) {
-      setActiveNodeIds(mappedNodeIds);
+      setCurrentNodeIds((prev) => (areStringArraysEqual(prev, mappedNodeIds) ? prev : mappedNodeIds));
+      setVisitedNodeIds((prev) => mergeUniqueNodes(prev, mappedNodeIds));
+
+      if (isFailureEvent) {
+        setFailedNodeIds((prev) => mergeUniqueNodes(prev, mappedNodeIds));
+      }
+      return;
     }
-  }, [lastEventType, logs]);
+
+    if (isFailureEvent && currentNodeIdsRef.current.length > 0) {
+      setFailedNodeIds((prev) => mergeUniqueNodes(prev, currentNodeIdsRef.current));
+    }
+  }, [lastEventType, logs, status]);
+
+  const sourceDocumentUrl = resolveSourceUrl(activeDocumentUrl);
+  const previewDocumentUrl = buildPreviewUrl(activeDocumentUrl);
+
+  useEffect(() => {
+    if (!previewDocumentUrl || !isMarkdownUrl(sourceDocumentUrl)) {
+      setMarkdownContent("");
+      setMarkdownLoading(false);
+      setMarkdownError("");
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const loadMarkdown = async () => {
+      setMarkdownLoading(true);
+      setMarkdownError("");
+
+      try {
+        const response = await fetch(previewDocumentUrl, {
+          signal: controller.signal,
+          credentials: "include",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch markdown (${response.status})`);
+        }
+
+        const text = await response.text();
+        setMarkdownContent(text);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setMarkdownError(toMessage(error, "Failed to load markdown document."));
+          setMarkdownContent("");
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setMarkdownLoading(false);
+        }
+      }
+    };
+
+    loadMarkdown();
+
+    return () => {
+      controller.abort();
+    };
+  }, [previewDocumentUrl, sourceDocumentUrl]);
 
   const memoNodeTypes = useMemo(() => nodeTypes, []);
-  const activeSet = useMemo(() => new Set(activeNodeIds), [activeNodeIds]);
+  const currentSet = useMemo(() => new Set(currentNodeIds), [currentNodeIds]);
+  const visitedSet = useMemo(() => new Set(visitedNodeIds), [visitedNodeIds]);
+  const failedSet = useMemo(() => new Set(failedNodeIds), [failedNodeIds]);
 
   const flowNodes = useMemo(
     () =>
@@ -465,19 +742,34 @@ export default function WorkspacePage() {
         ...node,
         data: {
           ...node.data,
-          active: activeSet.has(node.id),
+          nodeState: failedSet.has(node.id) && currentSet.has(node.id) ? "failed" : visitedSet.has(node.id) || currentSet.has(node.id) ? "active" : "idle",
         },
       })),
-    [activeSet]
+    [currentSet, failedSet, visitedSet]
   );
 
-  const processStatus = (processData?.status || "idle").toString().trim().toLowerCase();
-  const headerStatus = processStatus || "idle";
+  const processStatus = (processData?.status || "").toString().trim().toLowerCase();
+  const socketStatus = (status || "").toString().trim().toLowerCase();
+  const eventStatus = (lastEventType || "").toString().trim().toLowerCase();
   const referenceUrls = Array.isArray(processData?.reference_urls) ? processData.reference_urls : [];
   const questionUrls = Array.isArray(processData?.question_urls) ? processData.question_urls : [];
   const resultUrls = Array.isArray(processData?.result_urls) ? processData.result_urls : [];
   const resolvedFinalAnswerUrl = finalAnswerUrl || processData?.final_answer_url || "";
+  const isFailedState =
+    [socketStatus, processStatus, eventStatus].some((value) => value.includes("failed") || value.includes("error"));
+  const isCompletedState =
+    Boolean(resolvedFinalAnswerUrl) ||
+    [socketStatus, processStatus, eventStatus].some(
+      (value) => value.includes("complete") || value.includes("completed") || value.includes("done") || value.includes("success")
+    );
+  const headerStatus = isFailedState ? "failed" : isCompletedState ? "completed" : projectId ? "processing" : "idle";
+  const sidebarResultUrls = Array.from(
+    new Set(
+      [resolvedFinalAnswerUrl, ...resultUrls].filter((item) => typeof item === "string" && item.trim())
+    )
+  );
   const agentStatusLabel = toTitleCase(headerStatus);
+  const documentIsMarkdown = isMarkdownUrl(sourceDocumentUrl);
   const statusDotClass = ["failed", "error"].includes(headerStatus)
     ? "bg-red-400"
     : ["completed", "complete", "success"].includes(headerStatus)
@@ -497,8 +789,7 @@ export default function WorkspacePage() {
               projectId={projectId}
               referenceUrls={referenceUrls}
               questionUrls={questionUrls}
-              resultUrls={resultUrls}
-              finalAnswerUrl={resolvedFinalAnswerUrl}
+              resultUrls={sidebarResultUrls}
               activeFile={activeDocumentUrl}
               onFileSelect={(url) => {
                 setActiveDocumentUrl(url);
@@ -582,8 +873,27 @@ export default function WorkspacePage() {
                 ) : (
                   <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-white/10 bg-black/20">
                     <div className="h-full">
-                      {activeDocumentUrl ? (
-                        <iframe src={activeDocumentUrl} className="h-full w-full border-0 bg-white" title="Generated Document" />
+                      {previewDocumentUrl ? (
+                        documentIsMarkdown ? (
+                          <div className="h-full overflow-auto bg-[#0c0d11] p-4 md:p-6">
+                            {markdownLoading ? (
+                              <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-slate-300">
+                                <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-violet-300/30 border-t-violet-300" />
+                                Rendering markdown...
+                              </div>
+                            ) : markdownError ? (
+                              <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center text-sm text-red-300">
+                                {markdownError}
+                              </div>
+                            ) : (
+                              <article className="markdown-preview mx-auto max-w-5xl rounded-2xl border border-white/10 bg-[#11131a] px-5 py-6 text-slate-100 md:px-8 md:py-8">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdownContent}</ReactMarkdown>
+                              </article>
+                            )}
+                          </div>
+                        ) : (
+                          <iframe src={previewDocumentUrl} className="h-full w-full border-0 bg-white" title="Generated Document" />
+                        )
                       ) : (
                         <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
                           <p className="text-sm font-semibold text-slate-200">Select a document from the sidebar</p>
@@ -605,6 +915,10 @@ export default function WorkspacePage() {
           animation: pulseGlow 1.8s ease-in-out infinite;
         }
 
+        .node-failed-glow {
+          animation: pulseGlowRed 1.8s ease-in-out infinite;
+        }
+
         @keyframes pulseGlow {
           0%,
           100% {
@@ -613,6 +927,108 @@ export default function WorkspacePage() {
           50% {
             box-shadow: 0 0 24px rgba(139, 92, 246, 0.75), 0 0 48px rgba(139, 92, 246, 0.35);
           }
+        }
+
+        @keyframes pulseGlowRed {
+          0%,
+          100% {
+            box-shadow: 0 0 14px rgba(248, 113, 113, 0.35), 0 0 30px rgba(248, 113, 113, 0.15);
+          }
+          50% {
+            box-shadow: 0 0 24px rgba(248, 113, 113, 0.75), 0 0 48px rgba(248, 113, 113, 0.35);
+          }
+        }
+
+        .markdown-preview :global(h1),
+        .markdown-preview :global(h2),
+        .markdown-preview :global(h3),
+        .markdown-preview :global(h4) {
+          margin-top: 1.2rem;
+          margin-bottom: 0.6rem;
+          font-weight: 700;
+          color: #f8fafc;
+          line-height: 1.25;
+        }
+
+        .markdown-preview :global(h1) {
+          font-size: 1.7rem;
+          border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+          padding-bottom: 0.5rem;
+        }
+
+        .markdown-preview :global(h2) {
+          font-size: 1.4rem;
+        }
+
+        .markdown-preview :global(h3) {
+          font-size: 1.15rem;
+        }
+
+        .markdown-preview :global(p),
+        .markdown-preview :global(li),
+        .markdown-preview :global(blockquote) {
+          color: #dbe2f1;
+          line-height: 1.7;
+          font-size: 0.97rem;
+        }
+
+        .markdown-preview :global(p) {
+          margin: 0.7rem 0;
+        }
+
+        .markdown-preview :global(ul),
+        .markdown-preview :global(ol) {
+          margin: 0.8rem 0 0.8rem 1.2rem;
+        }
+
+        .markdown-preview :global(code) {
+          border: 1px solid rgba(148, 163, 184, 0.2);
+          background: rgba(15, 23, 42, 0.75);
+          color: #c4b5fd;
+          border-radius: 0.4rem;
+          padding: 0.1rem 0.35rem;
+          font-size: 0.88em;
+        }
+
+        .markdown-preview :global(pre) {
+          overflow-x: auto;
+          border: 1px solid rgba(148, 163, 184, 0.2);
+          background: rgba(15, 23, 42, 0.95);
+          border-radius: 0.7rem;
+          padding: 0.85rem 1rem;
+          margin: 0.9rem 0;
+        }
+
+        .markdown-preview :global(pre code) {
+          border: 0;
+          background: transparent;
+          padding: 0;
+          color: #e2e8f0;
+        }
+
+        .markdown-preview :global(table) {
+          width: 100%;
+          border-collapse: collapse;
+          margin: 0.9rem 0;
+        }
+
+        .markdown-preview :global(th),
+        .markdown-preview :global(td) {
+          border: 1px solid rgba(148, 163, 184, 0.3);
+          padding: 0.45rem 0.6rem;
+          text-align: left;
+        }
+
+        .markdown-preview :global(a) {
+          color: #93c5fd;
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+
+        .markdown-preview :global(hr) {
+          border: 0;
+          border-top: 1px solid rgba(148, 163, 184, 0.25);
+          margin: 1.1rem 0;
         }
       `}</style>
     </main>
