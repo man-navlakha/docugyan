@@ -1,21 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import BrandLogo from '@/components/BrandLogo';
 import { LOCAL_STORAGE_KEYS, clearStoredProcessState } from '@/lib/api/docuApi';
 
-// Updated Navigation Items
-const navItems = [
-  { label: 'Dashboard', href: '/dashboard' },
-  { label: 'DocuAgent', href: '/dashboard/agent' },
-];
-
 export default function TopNavbar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [isMounted, setIsMounted] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const handleLogout = async () => {
     if (loggingOut) {
@@ -37,38 +36,37 @@ export default function TopNavbar() {
     }
   };
 
+  if (!isMounted) {
+    return (
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0f0f14]/80 px-4 py-3 backdrop-blur-xl md:px-6">
+        <div className="flex items-center gap-4">
+          <BrandLogo href="/dashboard/agent" />
+          <div className="ml-auto h-8 w-24 rounded-lg border border-white/10 bg-white/5" />
+        </div>
+      </header>
+    );
+  }
+
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0f0f14]/80 px-4 py-3 backdrop-blur-xl md:px-6">
       <div className="flex items-center gap-4">
         
         {/* Left Side: Logo & Desktop Navigation */}
         <div className="flex items-center gap-8">
-          <BrandLogo href="/dashboard" />
+          <BrandLogo href="/dashboard/agent" />
           
           <nav className="hidden items-center gap-2 lg:flex">
-            {navItems.map((item) => {
-              const active = !!item.href && pathname === item.href;
-              const classes = `relative rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
-                active ? 'text-white' : 'text-slate-400 hover:text-slate-100'
-              }`;
-
-              if (item.href) {
-                return (
-                  <Link key={item.label} href={item.href} className={classes}>
-                    {item.label}
-                    {active && (
-                      <span className="absolute inset-x-3 -bottom-0.5 h-[2px] rounded-full bg-gradient-to-r from-violet-500 to-indigo-500 shadow-[0_0_8px_rgba(139,92,246,0.5)]" />
-                    )}
-                  </Link>
-                );
-              }
-
-              return (
-                <button key={item.label} type="button" className={classes}>
-                  {item.label}
-                </button>
-              );
-            })}
+            <Link
+              href="/dashboard/agent"
+              className={`relative rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                pathname === '/dashboard/agent' ? 'text-white' : 'text-slate-400 hover:text-slate-100'
+              }`}
+            >
+              DocuAgent
+              {pathname === '/dashboard/agent' && (
+                <span className="absolute inset-x-3 -bottom-0.5 h-[2px] rounded-full bg-gradient-to-r from-violet-500 to-indigo-500 shadow-[0_0_8px_rgba(139,92,246,0.5)]" />
+              )}
+            </Link>
           </nav>
         </div>
 
@@ -126,26 +124,16 @@ export default function TopNavbar() {
 
       {/* Mobile Navigation */}
       <nav className="mt-3 flex gap-1 overflow-x-auto pb-1 lg:hidden [&::-webkit-scrollbar]:hidden">
-        {navItems.map((item) => {
-          const active = !!item.href && pathname === item.href;
-          const classes = `whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
-            active ? 'bg-violet-500/20 text-violet-200 border border-violet-500/30' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-          }`;
-
-          if (item.href) {
-            return (
-              <Link key={`${item.label}-mobile`} href={item.href} className={classes}>
-                {item.label}
-              </Link>
-            );
-          }
-
-          return (
-            <button key={`${item.label}-mobile`} type="button" className={classes}>
-              {item.label}
-            </button>
-          );
-        })}
+        <Link
+          href="/dashboard/agent"
+          className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+            pathname === '/dashboard/agent'
+              ? 'bg-violet-500/20 text-violet-200 border border-violet-500/30'
+              : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+          }`}
+        >
+          DocuAgent
+        </Link>
       </nav>
     </header>
   );

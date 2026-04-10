@@ -11,7 +11,7 @@ export default function Home() {
             <Link href="/login" className="rounded-xl border border-white/20 px-4 py-2 hover:border-white/50">
               Login
             </Link>
-            <Link href="/dashboard" className="brand-chip neon-purple rounded-xl px-4 py-2 text-white">
+            <Link href="/dashboard/agent" className="brand-chip neon-purple rounded-xl px-4 py-2 text-white">
               Open Dashboard
             </Link>
           </div>
@@ -30,7 +30,7 @@ export default function Home() {
               <Link href="/dashboard/chat" className="brand-chip neon-purple rounded-xl px-5 py-3 text-sm font-semibold text-white">
                 Start AI Chat
               </Link>
-              <Link href="/dashboard" className="rounded-xl border border-white/20 px-5 py-3 text-sm font-semibold text-slate-100 hover:border-white/50">
+              <Link href="/dashboard/agent" className="rounded-xl border border-white/20 px-5 py-3 text-sm font-semibold text-slate-100 hover:border-white/50">
                 Explore Dashboard
               </Link>
             </div>

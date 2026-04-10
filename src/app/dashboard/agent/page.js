@@ -77,7 +77,11 @@ export default function DocuAgentPage() {
     if (type === "reference") {
       setReferenceFiles((prev) => [...prev, ...validFiles]);
     } else {
-      setQuestionFiles((prev) => [...prev, ...validFiles]);
+      if (validFiles.length > 1 || questionFiles.length > 0) {
+        setError("Questions & Tasks accepts only one document. Keeping the first valid file only.");
+        setTimeout(() => setError(""), 5000);
+      }
+      setQuestionFiles([validFiles[0]]);
     }
     
     if (e.target.value) e.target.value = '';
@@ -352,7 +356,7 @@ export default function DocuAgentPage() {
                   onClick={() => qInputRef.current.click()}
                   className="group relative flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-white/15 bg-black/20 py-10 transition-all hover:border-emerald-500/50 hover:bg-emerald-500/5"
                 >
-                  <input type="file" ref={qInputRef} onChange={(e) => handleFileDrop(e, "question")} className="hidden" multiple accept={ACCEPT_STRING} />
+                  <input type="file" ref={qInputRef} onChange={(e) => handleFileDrop(e, "question")} className="hidden" accept={ACCEPT_STRING} />
                   <div className="mb-3 rounded-full bg-white/5 p-3 text-slate-400 group-hover:text-emerald-400 transition-colors">
                     <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                   </div>
@@ -360,6 +364,7 @@ export default function DocuAgentPage() {
                   <p className="mt-1 text-xs text-slate-500 text-center px-4 uppercase">
                     PDF, TXT, MD, PNG, JPG, WEBP, BMP
                   </p>
+                  <p className="mt-2 text-[10px] text-emerald-300/90 uppercase tracking-wider">Only one document allowed</p>
                 </div>
                 {questionFiles.length > 0 && (
                   <div className="mt-4 flex flex-col gap-2 overflow-y-auto max-h-[160px] pr-2 custom-scrollbar">
