@@ -1,19 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { LOCAL_STORAGE_KEYS } from "@/lib/api/docuApi";
 
 export default function DashboardPage() {
-  const [userUuid, setUserUuid] = useState("");
-  const [projectId, setProjectId] = useState("");
-  const [taskId, setTaskId] = useState("");
-
-  useEffect(() => {
-    setUserUuid(window.localStorage.getItem(LOCAL_STORAGE_KEYS.userUuid) ?? "");
-    setProjectId(window.localStorage.getItem(LOCAL_STORAGE_KEYS.projectId) ?? "");
-    setTaskId(window.localStorage.getItem(LOCAL_STORAGE_KEYS.taskId) ?? "");
-  }, []);
+  const [userUuid] = useState(() => (typeof window === "undefined" ? "" : (window.localStorage.getItem(LOCAL_STORAGE_KEYS.userUuid) ?? "")));
+  const [projectId] = useState(() => (typeof window === "undefined" ? "" : (window.localStorage.getItem(LOCAL_STORAGE_KEYS.projectId) ?? "")));
+  const [taskId] = useState(() => (typeof window === "undefined" ? "" : (window.localStorage.getItem(LOCAL_STORAGE_KEYS.taskId) ?? "")));
 
   return (
     <div className="space-y-5">

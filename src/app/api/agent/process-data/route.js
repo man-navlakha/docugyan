@@ -2,16 +2,17 @@ import { NextResponse } from "next/server";
 import { applyAuthCookies } from "@/lib/auth/cookies";
 import { buildBackendUrl, getRequestAuthHeaders, readJsonSafe } from "@/lib/auth/backend";
 
-const INIT_PATHS = ["/api/agent/init-docu-process/", "/agent/init-docu-process/"];
+const PROCESS_DATA_PATHS = ["/api/agent/process-data/", "/agent/process-data/"];
 
-async function requestInitDocuProcess(request, initBody, path) {
-  return fetch(buildBackendUrl(path), {
-    method: "POST",
+async function requestProcessData(request, projectId, path) {
+  const backendUrl = new URL(buildBackendUrl(path));
+  backendUrl.searchParams.set("project_id", projectId);
+
+  return fetch(backendUrl.toString(), {
+    method: "GET",
     headers: {
-      "Content-Type": "application/json",
       ...getRequestAuthHeaders(request),
     },
-    body: JSON.stringify(initBody),
     cache: "no-store",
   });
 }
@@ -26,29 +27,20 @@ async function refreshAuth(request) {
   });
 }
 
-export async function POST(request) {
-  let body;
+export async function GET(request) {
+  const projectId = request.nextUrl.searchParams.get("project_id")?.trim();
 
-  try {
-    body = await request.json();
-  } catch {
-    return Response.json({ message: "Invalid JSON payload." }, { status: 400 });
+  if (!projectId) {
+    return Response.json({ message: "project_id is required." }, { status: 400 });
   }
 
-  const text = typeof body?.text === "string" ? body.text.trim() : "";
-  const description = typeof body?.description === "string" ? body.description.trim() : "";
-  const initBody = {
-    ...(text ? { text } : {}),
-    ...(description ? { description } : {}),
-  };
-
   try {
-    let usedPath = INIT_PATHS[0];
-    let backendResponse = await requestInitDocuProcess(request, initBody, usedPath);
+    let usedPath = PROCESS_DATA_PATHS[0];
+    let backendResponse = await requestProcessData(request, projectId, usedPath);
 
     if (backendResponse.status === 404) {
-      usedPath = INIT_PATHS[1];
-      backendResponse = await requestInitDocuProcess(request, initBody, usedPath);
+      usedPath = PROCESS_DATA_PATHS[1];
+      backendResponse = await requestProcessData(request, projectId, usedPath);
     }
 
     let refreshResponse = null;
@@ -56,7 +48,7 @@ export async function POST(request) {
       refreshResponse = await refreshAuth(request);
 
       if (refreshResponse.ok) {
-        backendResponse = await requestInitDocuProcess(request, initBody, usedPath);
+        backendResponse = await requestProcessData(request, projectId, usedPath);
       }
     }
 

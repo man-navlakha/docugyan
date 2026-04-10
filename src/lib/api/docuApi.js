@@ -92,6 +92,49 @@ export function parseApiError(payload, status, fallbackMessage = "Request failed
   return fallbackMessage;
 }
 
+function shouldRetryAfterUnauthorized(url) {
+  return url.startsWith(AGENT_PROXY_BASE) || url === `${AUTH_PROXY_BASE}/access`;
+}
+
+function normalizeUrlArray(value) {
+  const flattened = [];
+
+  const walk = (input) => {
+    if (Array.isArray(input)) {
+      for (const item of input) {
+        walk(item);
+      }
+      return;
+    }
+
+    if (typeof input !== "string") {
+      return;
+    }
+
+    const next = input.trim();
+    if (next) {
+      flattened.push(next);
+    }
+  };
+
+  walk(value);
+  return flattened;
+}
+
+async function refreshAuthToken() {
+  try {
+    const response = await fetch(`${AUTH_PROXY_BASE}/refresh`, {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+    });
+
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function requestJson(url, init = {}, fallbackMessage = "Request failed.") {
   let response;
 
@@ -104,7 +147,23 @@ async function requestJson(url, init = {}, fallbackMessage = "Request failed.") 
     throw new ApiError("Network error. Backend is unreachable.", 0, null, url);
   }
 
-  const payload = await readJsonSafe(response);
+  let payload = await readJsonSafe(response);
+
+  if (response.status === 401 && shouldRetryAfterUnauthorized(url)) {
+    const refreshed = await refreshAuthToken();
+
+    if (refreshed) {
+      try {
+        response = await fetch(url, {
+          cache: "no-store",
+          ...init,
+        });
+        payload = await readJsonSafe(response);
+      } catch {
+        throw new ApiError("Network error. Backend is unreachable.", 0, null, url);
+      }
+    }
+  }
 
   if (!response.ok) {
     throw new ApiError(parseApiError(payload, response.status, fallbackMessage), response.status, payload, url);
@@ -190,6 +249,17 @@ export async function fetchAccessToken() {
   return authRequest("/access", { method: "GET" }, "Unable to fetch access token.");
 }
 
+export async function fetchWsToken() {
+  return requestJson(
+    "/api/core/ws-token",
+    {
+      method: "GET",
+      credentials: "include",
+    },
+    "Unable to fetch WebSocket token."
+  );
+}
+
 export async function logout() {
   return authRequest("/logout", { method: "POST" }, "Logout failed.");
 }
@@ -199,13 +269,13 @@ export async function logout() {
  * @property {string} project_id
  * @property {string} blob_collection
  */
-export async function initDocuProcess(userUuid) {
+export async function initDocuProcess() {
   return agentRequest(
     "/init-docu-process",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_uuid: userUuid?.trim?.() ?? userUuid }),
+      body: JSON.stringify({}),
     },
     "Failed to initialize document process."
   );
@@ -217,7 +287,10 @@ export async function initDocuProcess(userUuid) {
  * @property {string=} task_id
  * @property {string=} message
  */
-export async function startDocuProcess({ project_id, user_uuid, reference_urls, question_urls }) {
+export async function startDocuProcess({ project_id, reference_urls, question_urls }) {
+  const normalizedReferenceUrls = normalizeUrlArray(reference_urls);
+  const normalizedQuestionUrls = normalizeUrlArray(question_urls);
+
   return agentRequest(
     "/process",
     {
@@ -225,12 +298,23 @@ export async function startDocuProcess({ project_id, user_uuid, reference_urls, 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         project_id: project_id?.trim?.() ?? project_id,
-        user_uuid: user_uuid?.trim?.() ?? user_uuid,
-        reference_urls,
-        question_urls,
+        reference_urls: normalizedReferenceUrls,
+        question_urls: normalizedQuestionUrls[0] ?? "",
       }),
     },
     "Failed to start processing."
+  );
+}
+
+export async function fetchDocuProcessData(projectId) {
+  const nextProjectId = projectId?.trim?.() ?? projectId;
+
+  return agentRequest(
+    `/process-data?project_id=${encodeURIComponent(nextProjectId ?? "")}`,
+    {
+      method: "GET",
+    },
+    "Failed to load workspace data."
   );
 }
 
@@ -255,6 +339,7 @@ export function buildProcessWebSocketUrl(projectId, accessToken) {
   const backendBase = new URL(getBackendBaseUrl());
   const protocol = backendBase.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = new URL(`/ws/agent/process/${projectId}/`, `${protocol}//${backendBase.host}`);
+  wsUrl.searchParams.set("client", "docugyan-fe");
 
   if (accessToken) {
     wsUrl.searchParams.set("token", accessToken);

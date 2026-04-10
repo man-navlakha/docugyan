@@ -21,10 +21,11 @@ function getMessage(error, fallback) {
   return fallback;
 }
 
-const GoogleAuthSection = memo(function GoogleAuthSection({ googleLoading, onSuccess, onError }) {
+const GoogleAuthSection = memo(function GoogleAuthSection({ googleLoading, onSuccess, onError, renderKey }) {
   return (
     <div className={`flex justify-center transition-opacity duration-300 ${googleLoading ? "pointer-events-none opacity-50" : ""}`}>
       <GoogleLogin
+        key={renderKey}
         onSuccess={onSuccess}
         onError={onError}
         theme="filled_black"
@@ -48,6 +49,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleRenderKey, setGoogleRenderKey] = useState(0);
   const [authSuccess, setAuthSuccess] = useState(false);
   const [successText, setSuccessText] = useState("Authentication successful.");
   const [redirectStartedAt, setRedirectStartedAt] = useState(0);
@@ -59,6 +61,35 @@ export default function LoginPage() {
   useEffect(() => {
     router.prefetch(targetPath);
   }, [router, targetPath]);
+
+  useEffect(() => {
+    setGoogleRenderKey(Date.now());
+
+    const handlePageShow = (event) => {
+      if (!event.persisted) {
+        return;
+      }
+
+      // Chrome bfcache can restore a stale GIS iframe tree; hard reload ensures widget re-initializes.
+      window.location.reload();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      // Rebuild Google iframe widget when returning from browser history/cache.
+      setGoogleRenderKey(Date.now());
+    };
+
+    window.addEventListener("pageshow", handlePageShow);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pageshow", handlePageShow);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   const persistSessionState = async (userUuid) => {
     if (userUuid) {
@@ -313,10 +344,15 @@ export default function LoginPage() {
         </div>
 
         {/* Official Google Login Component */}
-        <GoogleAuthSection googleLoading={googleLoading} onSuccess={handleGoogleSuccess} onError={handleGoogleError} />
+        <GoogleAuthSection
+          googleLoading={googleLoading}
+          onSuccess={handleGoogleSuccess}
+          onError={handleGoogleError}
+          renderKey={googleRenderKey}
+        />
 
         <p className="mt-8 text-center text-xs text-slate-500">
-          By continuing, you agree to DocuGyan's{" "}
+          By continuing, you agree to DocuGyan&apos;s{" "}
           <Link href="#" className="text-slate-400 hover:text-white transition-colors">Terms</Link> and{" "}
           <Link href="#" className="text-slate-400 hover:text-white transition-colors">Privacy Policy</Link>.
         </p>
