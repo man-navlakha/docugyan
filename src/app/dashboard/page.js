@@ -1,15 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LOCAL_STORAGE_KEYS } from "@/lib/api/docuApi";
 
 export default function DashboardPage() {
-  const [userUuid] = useState(() => (typeof window === "undefined" ? "" : window.localStorage.getItem(LOCAL_STORAGE_KEYS.userUuid) ?? ""));
-  const [projectId] = useState(() =>
-    typeof window === "undefined" ? "" : window.localStorage.getItem(LOCAL_STORAGE_KEYS.projectId) ?? ""
-  );
-  const [taskId] = useState(() => (typeof window === "undefined" ? "" : window.localStorage.getItem(LOCAL_STORAGE_KEYS.taskId) ?? ""));
+  const [userUuid, setUserUuid] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [taskId, setTaskId] = useState("");
+
+  useEffect(() => {
+    setUserUuid(window.localStorage.getItem(LOCAL_STORAGE_KEYS.userUuid) ?? "");
+    setProjectId(window.localStorage.getItem(LOCAL_STORAGE_KEYS.projectId) ?? "");
+    setTaskId(window.localStorage.getItem(LOCAL_STORAGE_KEYS.taskId) ?? "");
+  }, []);
 
   return (
     <div className="space-y-5">
@@ -27,7 +31,7 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <Link href="/dashboard/chat" className="brand-chip neon-purple inline-flex rounded-xl px-5 py-3 text-sm font-semibold text-white">
+      <Link href="/dashboard/agent" className="brand-chip neon-purple inline-flex rounded-xl px-5 py-3 text-sm font-semibold text-white">
         Open 5-Step Wizard
       </Link>
     </div>
