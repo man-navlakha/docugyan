@@ -318,11 +318,74 @@ export async function fetchDocuProcessData(projectId) {
   );
 }
 
-export async function uploadFileToBlob(file, folder) {
+export async function fetchUserProfile() {
+  return agentRequest(
+    "/user-profile",
+    {
+      method: "GET",
+    },
+    "Failed to load user profile."
+  );
+}
+
+/**
+ * @typedef {Object} DocuProcessListItem
+ * @property {string} project_id
+ * @property {string} user_uuid
+ * @property {string=} title
+ * @property {string=} description
+ * @property {string[]|string=} reference_urls
+ * @property {string[]|string=} question_urls
+ * @property {string[]|string=} result_urls
+ * @property {string=} created_at
+ * @property {string=} status
+ */
+
+/**
+ * @typedef {Object} DocuProcessListResponse
+ * @property {number=} count
+ * @property {string|null=} next
+ * @property {string|null=} previous
+ * @property {DocuProcessListItem[]=} results
+ */
+export async function fetchDocuProcessList({ page = 1, pageSize = 10, search = "" } = {}) {
+  const nextPage = Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
+  const nextPageSize = Number.isFinite(pageSize) ? Math.min(50, Math.max(1, Math.floor(pageSize))) : 10;
+
+  const params = new URLSearchParams();
+  params.set("page", String(nextPage));
+  params.set("page_size", String(nextPageSize));
+
+  if (typeof search === "string" && search.trim()) {
+    params.set("search", search.trim());
+  }
+
+  return agentRequest(
+    `/process-list?${params.toString()}`,
+    {
+      method: "GET",
+    },
+    "Failed to load document history."
+  );
+}
+
+export async function uploadFileToBlob(file, folder, options = {}) {
   const formData = new FormData();
   formData.set("file", file);
   if (folder) {
     formData.set("folder", folder);
+  }
+
+  if (options?.overwrite) {
+    formData.set("overwrite", "true");
+  }
+
+  if (options?.sourceUrl) {
+    formData.set("source_url", options.sourceUrl);
+  }
+
+  if (options?.pathname) {
+    formData.set("pathname", options.pathname);
   }
 
   return requestJson(
@@ -337,8 +400,19 @@ export async function uploadFileToBlob(file, folder) {
 
 export function buildProcessWebSocketUrl(projectId, accessToken) {
   const backendBase = new URL(getBackendBaseUrl());
-  const protocol = backendBase.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = new URL(`/ws/agent/process/${projectId}/`, `${protocol}//${backendBase.host}`);
+  let protocol = backendBase.protocol === "https:" ? "wss:" : "ws:";
+  let host = backendBase.host; // e.g. "127.0.0.1:8000"
+
+  // If running in the browser and the backend is configured to loopback,
+  // but we are accessing it via a LAN IP (like 172.x or 192.x),
+  // we must swap the loopback IP for the LAN IP so the phone/external device
+  // actually attempts to connect to the server device instead of itself.
+  if (typeof window !== "undefined" && backendBase.hostname === "127.0.0.1" && window.location.hostname !== "127.0.0.1" && window.location.hostname !== "localhost") {
+    host = `${window.location.hostname}:${backendBase.port || "8000"}`;
+    protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  }
+
+  const wsUrl = new URL(`/ws/agent/process/${projectId}/`, `${protocol}//${host}`);
   wsUrl.searchParams.set("client", "docugyan-fe");
 
   if (accessToken) {
@@ -356,4 +430,28 @@ export function clearStoredProcessState() {
   window.localStorage.removeItem(LOCAL_STORAGE_KEYS.projectId);
   window.localStorage.removeItem(LOCAL_STORAGE_KEYS.blobCollection);
   window.localStorage.removeItem(LOCAL_STORAGE_KEYS.taskId);
+}
+
+export async function deleteDocuProcess(projectId) {
+  return agentRequest(
+    "/delete-process",
+    {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_id: projectId }),
+    },
+    "Failed to delete document process."
+  );
+}
+
+export async function saveGroomingData(projectId, groomingData) {
+  return agentRequest(
+    "/grooming",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_id: projectId, grooming_data: groomingData }),
+    },
+    "Failed to save grooming data."
+  );
 }

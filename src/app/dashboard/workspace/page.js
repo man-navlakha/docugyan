@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ReactFlow, { Background, Controls, Handle, MarkerType, Position } from "reactflow";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import "reactflow/dist/style.css";
-import { fetchDocuProcessData } from "@/lib/api/docuApi";
+import { fetchDocuProcessData, saveGroomingData } from "@/lib/api/docuApi";
 import { useAgentWebSocket } from "@/lib/realtime/useAgentWebSocket";
 import WorkspaceSidebar from "@/components/sidebar/WorkspaceSidebar";
 
@@ -246,6 +246,205 @@ function buildPreviewUrl(url) {
   return resolved;
 }
 
+function isSafeMarkdownImageUrl(url) {
+  const normalized = normalizeUrlString(url);
+  if (!normalized) {
+    return false;
+  }
+
+  if (/^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(normalized)) {
+    return true;
+  }
+
+  if (/^blob:/i.test(normalized)) {
+    return true;
+  }
+
+  if (/^https?:\/\//i.test(normalized)) {
+    return true;
+  }
+
+  return normalized.startsWith("/") || normalized.startsWith("./") || normalized.startsWith("../");
+}
+
+function markdownUrlTransform(url, key) {
+  const normalized = normalizeUrlString(url);
+  if (!normalized) {
+    return "";
+  }
+
+  if (key === "src" && normalized.startsWith("mdimg://")) {
+    return normalized;
+  }
+
+  // Allow embedded diagram images from backend markdown payloads.
+  if (key === "src" && isSafeMarkdownImageUrl(normalized)) {
+    return normalized;
+  }
+
+  return defaultUrlTransform(normalized);
+}
+
+function normalizeDataImageUrl(url) {
+  const normalized = normalizeUrlString(url);
+  if (!/^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(normalized)) {
+    return normalized;
+  }
+
+  const firstCommaIndex = normalized.indexOf(",");
+  if (firstCommaIndex < 0) {
+    return normalized;
+  }
+
+  const header = normalized.slice(0, firstCommaIndex + 1);
+  const payload = normalized.slice(firstCommaIndex + 1).replace(/\s+/g, "");
+  return `${header}${payload}`;
+}
+
+function tokenizeMarkdownDataImages(markdown) {
+  if (typeof markdown !== "string" || !markdown.trim()) {
+    return { content: "", imageByToken: {} };
+  }
+
+  const imageByToken = {};
+  let index = 0;
+  let cursor = 0;
+  let content = "";
+
+  while (cursor < markdown.length) {
+    const imageStart = markdown.indexOf("![", cursor);
+    if (imageStart < 0) {
+      content += markdown.slice(cursor);
+      break;
+    }
+
+    content += markdown.slice(cursor, imageStart);
+
+    const altEnd = markdown.indexOf("]", imageStart + 2);
+    if (altEnd < 0 || markdown[altEnd + 1] !== "(") {
+      content += markdown.slice(imageStart, altEnd < 0 ? undefined : altEnd + 1);
+      cursor = altEnd < 0 ? markdown.length : altEnd + 1;
+      continue;
+    }
+
+    let urlStart = altEnd + 2;
+    while (urlStart < markdown.length && /\s/.test(markdown[urlStart])) {
+      urlStart += 1;
+    }
+
+    const closeParen = markdown.indexOf(")", urlStart);
+    if (closeParen < 0) {
+      content += markdown.slice(imageStart);
+      cursor = markdown.length;
+      break;
+    }
+
+    const rawUrl = markdown.slice(urlStart, closeParen);
+    if (!/^data:image\//i.test(rawUrl.trim())) {
+      content += markdown.slice(imageStart, closeParen + 1);
+      cursor = closeParen + 1;
+      continue;
+    }
+
+    const token = `mdimg://${index}`;
+    const alt = markdown.slice(imageStart + 2, altEnd);
+    imageByToken[token] = normalizeDataImageUrl(rawUrl);
+    content += `![${alt}](${token})`;
+    index += 1;
+    cursor = closeParen + 1;
+  }
+
+  return { content, imageByToken };
+}
+
+function splitMarkdownReferencesBlock(markdown) {
+  if (typeof markdown !== "string" || !markdown.trim()) {
+    return { body: "", references: [] };
+  }
+
+  const startMarker = "---REFERENCES---";
+  const endMarker = "---END REFERENCES---";
+  const endIndex = markdown.lastIndexOf(endMarker);
+  const startIndex = endIndex >= 0 ? markdown.lastIndexOf(startMarker, endIndex) : -1;
+
+  if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) {
+    return { body: markdown, references: [] };
+  }
+
+  // Only extract a references block when it is truly the final block.
+  // If anything meaningful exists after END REFERENCES, keep full markdown body.
+  const afterEnd = markdown.slice(endIndex + endMarker.length).trim();
+  if (afterEnd) {
+    return { body: markdown, references: [] };
+  }
+
+  const body = markdown.slice(0, startIndex).trimEnd();
+  const block = markdown.slice(startIndex + startMarker.length, endIndex);
+
+  const references = block
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const match = line.match(/^\[\[ref:(\d+)\]\]\s*Title:\s*(.*?)\s*\|\s*URL:\s*(.*)$/i);
+      if (!match) {
+        return null;
+      }
+
+      return {
+        id: match[1],
+        title: match[2] || "Unknown source",
+        url: match[3] || "none",
+      };
+    })
+    .filter(Boolean);
+
+  return { body, references };
+}
+
+function getMarkdownFetchCandidates(url) {
+  const normalized = normalizeUrlString(url);
+  if (!normalized) {
+    return [];
+  }
+
+  const candidates = [];
+
+  const addCandidate = (candidate) => {
+    const next = normalizeUrlString(candidate);
+    if (!next) {
+      return;
+    }
+
+    try {
+      const parsed = new URL(next, /^https?:\/\//i.test(next) ? undefined : "http://local.preview");
+      if (parsed.hostname.endsWith(".blob.vercel-storage.com")) {
+        candidates.push(`/api/uploads/blob?url=${encodeURIComponent(parsed.toString())}`);
+        return;
+      }
+
+      candidates.push(next);
+    } catch {
+      candidates.push(next);
+    }
+  };
+
+  addCandidate(normalized);
+
+  try {
+    const parsed = new URL(normalized, /^https?:\/\//i.test(normalized) ? undefined : "http://local.preview");
+    const nested = parsed.searchParams.get("url");
+    const nestedNormalized = normalizeUrlString(nested || "");
+    if (nestedNormalized) {
+      addCandidate(nestedNormalized);
+    }
+  } catch {
+    // Ignore malformed URLs and keep the primary candidate only.
+  }
+
+  return Array.from(new Set(candidates));
+}
+
 function mapLogToActiveNodes(message, eventType) {
   const normalizedType = (eventType || "").toLowerCase();
   if (normalizedType === "completed") {
@@ -458,6 +657,7 @@ function normalizeProcessData(payload) {
   const resultUrls = findUrlListByKeys(objects, ["result_urls", "resultUrls", "result_url", "results", "output_urls", "output_url"]);
   const referenceUrls = findUrlListByKeys(objects, ["reference_urls", "referenceUrls", "reference_url", "references"]);
   const questionUrls = findUrlListByKeys(objects, ["question_urls", "questionUrls", "question_url", "questions"]);
+  const groomingData = root.grooming_data || objects.find((o) => isObject(o.grooming_data))?.grooming_data || null;
 
   return {
     ...root,
@@ -468,6 +668,7 @@ function normalizeProcessData(payload) {
     result_urls: resultUrls,
     reference_urls: referenceUrls,
     question_urls: questionUrls,
+    grooming_data: groomingData,
   };
 }
 
@@ -519,6 +720,8 @@ export default function WorkspacePage() {
   const [markdownContent, setMarkdownContent] = useState("");
   const [markdownLoading, setMarkdownLoading] = useState(false);
   const [markdownError, setMarkdownError] = useState("");
+  const [markdownImageUrlByToken, setMarkdownImageUrlByToken] = useState({});
+  const markdownObjectUrlsRef = useRef([]);
 
   const { connectionState, logs, status, lastEventType, finalAnswerUrl } = useAgentWebSocket(projectId, {
     enabled: Boolean(projectId),
@@ -594,25 +797,22 @@ export default function WorkspacePage() {
   }, [finalAnswerUrl, lastEventType, processData?.final_answer_url, processData?.status, status]);
 
   useEffect(() => {
-    if (!projectId || typeof window === "undefined") {
-      setCurrentNodeIds(["START"]);
-      setVisitedNodeIds(["START"]);
-      setFailedNodeIds([]);
-      currentNodeIdsRef.current = ["START"];
+    if (!processData) {
       return;
     }
 
     try {
-      const raw = window.localStorage.getItem(getGraphStateStorageKey(projectId));
-      if (!raw) {
-        setCurrentNodeIds(["START"]);
-        setVisitedNodeIds(["START"]);
-        setFailedNodeIds([]);
-        currentNodeIdsRef.current = ["START"];
+      const parsed = processData.grooming_data;
+      if (!parsed || !parsed.currentNodeIds) {
+        if (!currentNodeIdsRef.current || currentNodeIdsRef.current.length === 0 || currentNodeIdsRef.current[0] !== "START") {
+          setCurrentNodeIds(["START"]);
+          setVisitedNodeIds(["START"]);
+          setFailedNodeIds([]);
+          currentNodeIdsRef.current = ["START"];
+        }
         return;
       }
 
-      const parsed = JSON.parse(raw);
       const restoredCurrent = sanitizeNodeIdList(parsed?.currentNodeIds, ["START"]);
       const restoredVisited = sanitizeNodeIdList(parsed?.visitedNodeIds, ["START"]);
       const restoredFailed = sanitizeNodeIdList(parsed?.failedNodeIds, []);
@@ -627,25 +827,34 @@ export default function WorkspacePage() {
       setFailedNodeIds([]);
       currentNodeIdsRef.current = ["START"];
     }
-  }, [projectId]);
+  }, [processData?.grooming_data]);
 
   useEffect(() => {
-    if (!projectId || typeof window === "undefined") {
+    if (!projectId) {
       return;
     }
 
-    try {
-      const snapshot = {
-        currentNodeIds,
-        visitedNodeIds,
-        failedNodeIds,
-        savedAt: Date.now(),
-      };
-
-      window.localStorage.setItem(getGraphStateStorageKey(projectId), JSON.stringify(snapshot));
-    } catch {
-      // Ignore persistence failures (private mode/quota).
+    // Only save if we have actual state beyond just START
+    if (
+      currentNodeIds.length === 1 &&
+      currentNodeIds[0] === "START" &&
+      visitedNodeIds.length === 1 &&
+      visitedNodeIds[0] === "START" &&
+      failedNodeIds.length === 0
+    ) {
+      return;
     }
+
+    const snapshot = {
+      currentNodeIds,
+      visitedNodeIds,
+      failedNodeIds,
+      savedAt: Date.now(),
+    };
+
+    saveGroomingData(projectId, snapshot).catch(() => {
+      // Ignore API save failures silently
+    });
   }, [currentNodeIds, failedNodeIds, projectId, visitedNodeIds]);
 
   useEffect(() => {
@@ -701,17 +910,34 @@ export default function WorkspacePage() {
       setMarkdownError("");
 
       try {
-        const response = await fetch(previewDocumentUrl, {
-          signal: controller.signal,
-          credentials: "include",
-        });
+        const candidates = getMarkdownFetchCandidates(previewDocumentUrl);
+        let bestText = "";
+        let bestLength = -1;
+        let hadSuccess = false;
 
-        if (!response.ok) {
-          throw new Error(`Failed to fetch markdown (${response.status})`);
+        for (const candidateUrl of candidates) {
+          const response = await fetch(candidateUrl, {
+            signal: controller.signal,
+            credentials: "include",
+          });
+
+          if (!response.ok) {
+            continue;
+          }
+
+          hadSuccess = true;
+          const text = await response.text();
+          if (text.length > bestLength) {
+            bestText = text;
+            bestLength = text.length;
+          }
         }
 
-        const text = await response.text();
-        setMarkdownContent(text);
+        if (!hadSuccess) {
+          throw new Error("Failed to fetch markdown from available sources.");
+        }
+
+        setMarkdownContent(bestText);
       } catch (error) {
         if (!controller.signal.aborted) {
           setMarkdownError(toMessage(error, "Failed to load markdown document."));
@@ -732,6 +958,118 @@ export default function WorkspacePage() {
   }, [previewDocumentUrl, sourceDocumentUrl]);
 
   const memoNodeTypes = useMemo(() => nodeTypes, []);
+  const parsedMarkdown = useMemo(() => splitMarkdownReferencesBlock(markdownContent), [markdownContent]);
+  const tokenizedMarkdown = useMemo(() => tokenizeMarkdownDataImages(parsedMarkdown.body), [parsedMarkdown.body]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const resolveImageUrls = async () => {
+      for (const objectUrl of markdownObjectUrlsRef.current) {
+        URL.revokeObjectURL(objectUrl);
+      }
+      markdownObjectUrlsRef.current = [];
+
+      const entries = Object.entries(tokenizedMarkdown.imageByToken || {});
+      if (entries.length === 0) {
+        setMarkdownImageUrlByToken({});
+        return;
+      }
+
+      const nextMap = {};
+
+      await Promise.all(
+        entries.map(async ([token, source]) => {
+          if (!/^data:image\//i.test(source)) {
+            nextMap[token] = source;
+            return;
+          }
+
+          try {
+            const response = await fetch(source);
+            const blob = await response.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            markdownObjectUrlsRef.current.push(objectUrl);
+            nextMap[token] = objectUrl;
+          } catch {
+            nextMap[token] = source;
+          }
+        })
+      );
+
+      if (!cancelled) {
+        setMarkdownImageUrlByToken(nextMap);
+      }
+    };
+
+    resolveImageUrls();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tokenizedMarkdown.imageByToken]);
+
+  useEffect(
+    () => () => {
+      for (const objectUrl of markdownObjectUrlsRef.current) {
+        URL.revokeObjectURL(objectUrl);
+      }
+      markdownObjectUrlsRef.current = [];
+    },
+    []
+  );
+
+  const markdownComponents = useMemo(
+    () => ({
+      img: ({ src, alt, ...props }) => {
+        const tokenOrSrc = normalizeUrlString(src);
+        const safeSrc = markdownImageUrlByToken[tokenOrSrc] || tokenizedMarkdown.imageByToken[tokenOrSrc] || tokenOrSrc;
+        if (!isSafeMarkdownImageUrl(safeSrc)) {
+          return null;
+        }
+
+        return <img src={safeSrc} alt={alt || ""} loading="lazy" {...props} />;
+      },
+      a: ({ href, children, ...props }) => {
+        if (href?.startsWith("#citation:")) {
+          try {
+            const data = JSON.parse(decodeURIComponent(href.slice("#citation:".length)));
+            if (!data || data.length === 0) return null;
+            return (
+              <sup className="inline-flex gap-1 ml-1 align-top select-none">
+                {data.map((cite, i) => (
+                  <a 
+                    key={i} 
+                    href={cite.source_url} 
+                    target="_blank" 
+                    rel="noreferrer noopener" 
+                    className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[9px] font-bold text-violet-300 bg-violet-500/10 border border-violet-500/30 rounded-full hover:bg-violet-500/20 hover:border-violet-500/50 transition-colors !no-underline" 
+                    title={`Source${cite.page_number ? ` • Page ${cite.page_number}` : ''}`}
+                  >
+                    {i + 1}
+                  </a>
+                ))}
+              </sup>
+            );
+          } catch (e) {
+            return null;
+          }
+        }
+
+        const safeHref = normalizeUrlString(href);
+        if (!safeHref) {
+          return <span {...props}>{children}</span>;
+        }
+
+        return (
+          <a href={safeHref} target="_blank" rel="noreferrer noopener" {...props}>
+            {children}
+          </a>
+        );
+      },
+    }),
+    [markdownImageUrlByToken, tokenizedMarkdown.imageByToken]
+  );
   const currentSet = useMemo(() => new Set(currentNodeIds), [currentNodeIds]);
   const visitedSet = useMemo(() => new Set(visitedNodeIds), [visitedNodeIds]);
   const failedSet = useMemo(() => new Set(failedNodeIds), [failedNodeIds]);
@@ -770,6 +1108,36 @@ export default function WorkspacePage() {
   );
   const agentStatusLabel = toTitleCase(headerStatus);
   const documentIsMarkdown = isMarkdownUrl(sourceDocumentUrl);
+
+  const processedMarkdown = useMemo(() => {
+    let text = tokenizedMarkdown.content || "";
+    
+    // Replace JSON array citations
+    text = text.replace(/\[\s*\{.*?"source_url".*?\}\s*\]/gs, (match) => {
+      try {
+        const parsed = JSON.parse(match);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Check if valid data exists
+          const validCitations = parsed.filter(c => c && c.source_url && c.source_url.trim() !== "");
+          if (validCitations.length === 0) return ""; // don't display if no data
+          return `[CITATION](#citation:${encodeURIComponent(JSON.stringify(validCitations))})`;
+        }
+      } catch (e) {
+        // Ignore
+      }
+      return match;
+    });
+
+    // Remove empty brackets [] that the backend might send for empty citations, preserving markdown checklists
+    text = text.replace(/\s*(?<![-\*]\s*)\[\s*\]/g, "");
+
+    // Visually distinguish Question and Answer
+    text = text.replace(/^(\s*(?:>|\d+\.|-(?!\-)|\*(?!\*))*\s*)(?:\*\*)?(Question(?:\s*\d+)?|Q(?:\s*\d+)?)\s*[:.]?\s*(?:\*\*)?\s*/gmi, '\n\n---\n$1### 📝 $2:\n');
+    text = text.replace(/^(\s*(?:>|\d+\.|-(?!\-)|\*(?!\*))*\s*)(?:\*\*)?(Answer(?:\s*\d+)?|A(?:\s*\d+)?)\s*[:.]?\s*(?:\*\*)?\s*/gmi, '\n\n$1### 💡 $2:\n');
+
+    return text;
+  }, [tokenizedMarkdown.content]);
+
   const statusDotClass = ["failed", "error"].includes(headerStatus)
     ? "bg-red-400"
     : ["completed", "complete", "success"].includes(headerStatus)
@@ -797,7 +1165,7 @@ export default function WorkspacePage() {
               }}
             />
 
-            <section className="min-w-0 flex-1 p-3 md:p-4">
+            <section className="min-w-0 flex h-full min-h-0 flex-1 flex-col overflow-y-auto p-3 md:p-4">
               <header className="mb-3 overflow-hidden rounded-2xl border border-white/10 bg-black/30">
                 <div className="grid gap-4 px-4 py-4 lg:grid-cols-[1fr_auto] lg:items-start">
                   <div>
@@ -842,7 +1210,7 @@ export default function WorkspacePage() {
                 </div>
               </header>
 
-              <div className="flex h-[calc(100%-108px)] min-h-[420px] flex-col gap-3">
+              <div className="flex min-h-[420px] flex-1 flex-col gap-3">
                 {loadingData ? (
                   <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-white/10 bg-black/30">
                     <div className="flex items-center gap-2 text-sm text-slate-300">
@@ -871,11 +1239,11 @@ export default function WorkspacePage() {
                     </ReactFlow>
                   </div>
                 ) : (
-                  <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                  <div className="min-h-0 flex-1 overflow-visible rounded-xl border border-white/10 bg-black/20">
                     <div className="h-full">
                       {previewDocumentUrl ? (
                         documentIsMarkdown ? (
-                          <div className="h-full overflow-auto bg-[#0c0d11] p-4 md:p-6">
+                          <div className="bg-[#0c0d11] p-4 md:p-6">
                             {markdownLoading ? (
                               <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-slate-300">
                                 <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-violet-300/30 border-t-violet-300" />
@@ -887,7 +1255,35 @@ export default function WorkspacePage() {
                               </div>
                             ) : (
                               <article className="markdown-preview mx-auto max-w-5xl rounded-2xl border border-white/10 bg-[#11131a] px-5 py-6 text-slate-100 md:px-8 md:py-8">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdownContent}</ReactMarkdown>
+                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents} urlTransform={markdownUrlTransform}>
+                                  {processedMarkdown}
+                                </ReactMarkdown>
+
+                                {parsedMarkdown.references.length > 0 && (
+                                  <section className="mt-8 border-t border-white/10 pt-5">
+                                    <h4 className="text-xs font-bold uppercase tracking-[0.14em] text-violet-300">References</h4>
+                                    <div className="mt-3 space-y-2">
+                                      {parsedMarkdown.references.map((ref) => {
+                                        const safeUrl = normalizeUrlString(ref.url);
+                                        const isLink = /^https?:\/\//i.test(safeUrl);
+
+                                        return (
+                                          <div key={ref.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs">
+                                            <span className="rounded-full border border-violet-400/40 bg-violet-500/15 px-2 py-0.5 font-semibold text-violet-200">ref:{ref.id}</span>
+                                            <span className="text-slate-200">{ref.title}</span>
+                                            {isLink ? (
+                                              <a href={safeUrl} target="_blank" rel="noreferrer noopener" className="text-blue-300 underline decoration-blue-300/60 underline-offset-2">
+                                                Open source
+                                              </a>
+                                            ) : (
+                                              <span className="text-slate-500">URL unavailable</span>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </section>
+                                )}
                               </article>
                             )}
                           </div>
@@ -1023,6 +1419,18 @@ export default function WorkspacePage() {
           color: #93c5fd;
           text-decoration: underline;
           text-underline-offset: 2px;
+        }
+
+        .markdown-preview :global(img) {
+          display: block;
+          max-width: 100%;
+          max-height: min(74vh, 820px);
+          height: auto;
+          margin: 1rem auto;
+          border-radius: 0.75rem;
+          border: 1px solid rgba(148, 163, 184, 0.25);
+          background: rgba(15, 23, 42, 0.5);
+          object-fit: contain;
         }
 
         .markdown-preview :global(hr) {

@@ -16,6 +16,53 @@ function sanitizeFilename(name) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/-+/g, "-");
 }
 
+function sanitizePathname(pathname) {
+  if (!pathname || typeof pathname !== "string") {
+    return "";
+  }
+
+  return pathname
+    .replace(/^\/+/, "")
+    .replace(/[^a-zA-Z0-9/_\-.]/g, "")
+    .replace(/\/{2,}/g, "/")
+    .trim();
+}
+
+function resolveNestedBlobUrl(rawUrl, requestUrl) {
+  if (!rawUrl || typeof rawUrl !== "string") {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(rawUrl, requestUrl);
+    const nested = parsed.searchParams.get("url");
+    if (nested) {
+      return nested;
+    }
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+function extractBlobPathnameFromUrl(rawUrl, requestUrl) {
+  const resolved = resolveNestedBlobUrl(rawUrl, requestUrl);
+  if (!resolved) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(resolved);
+    if (parsed.protocol !== "https:" || !parsed.hostname.endsWith(".blob.vercel-storage.com")) {
+      return "";
+    }
+
+    return sanitizePathname(decodeURIComponent(parsed.pathname));
+  } catch {
+    return "";
+  }
+}
+
 function isPrivateStoreError(error) {
   if (!(error instanceof Error)) {
     return false;
@@ -54,6 +101,30 @@ async function uploadToBlob(pathname, file, token) {
     const uploaded = await put(pathname, file, {
       access: "private",
       addRandomSuffix: true,
+      token,
+    });
+    return { uploaded, access: "private" };
+  }
+}
+
+async function overwriteBlob(pathname, file, token) {
+  try {
+    const uploaded = await put(pathname, file, {
+      access: "public",
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      token,
+    });
+    return { uploaded, access: "public" };
+  } catch (error) {
+    if (!isPrivateStoreError(error)) {
+      throw error;
+    }
+
+    const uploaded = await put(pathname, file, {
+      access: "private",
+      addRandomSuffix: false,
+      allowOverwrite: true,
       token,
     });
     return { uploaded, access: "private" };
@@ -138,11 +209,18 @@ export async function POST(request) {
   }
 
   const folder = sanitizeFolder(String(formData.get("folder") ?? ""));
+  const shouldOverwrite = String(formData.get("overwrite") ?? "").toLowerCase() === "true";
+  const sourceUrl = String(formData.get("source_url") ?? "");
+  const explicitPathname = sanitizePathname(String(formData.get("pathname") ?? ""));
+  const overwritePathname = explicitPathname || extractBlobPathnameFromUrl(sourceUrl, request.url);
+
   const filename = `${Date.now()}-${sanitizeFilename(file.name || "upload.bin")}`;
-  const pathname = `${folder}/${filename}`;
+  const pathname = shouldOverwrite && overwritePathname ? overwritePathname : `${folder}/${filename}`;
 
   try {
-    const { uploaded, access } = await uploadToBlob(pathname, file, blobToken);
+    const { uploaded, access } = shouldOverwrite && overwritePathname
+      ? await overwriteBlob(pathname, file, blobToken)
+      : await uploadToBlob(pathname, file, blobToken);
     const proxyUrl = buildProxyUrl(request.url, uploaded.url);
     const shouldUseProxy = access === "private" || uploaded.url.includes(".private.blob.vercel-storage.com");
 
@@ -151,6 +229,7 @@ export async function POST(request) {
       blob_url: uploaded.url,
       pathname: uploaded.pathname,
       access,
+      overwrite: shouldOverwrite && Boolean(overwritePathname),
     });
   } catch (error) {
     const details = error instanceof Error ? error.message : "Unknown blob upload error.";

@@ -1,44 +1,83 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchDocuProcessList, LOCAL_STORAGE_KEYS, deleteDocuProcess } from "@/lib/api/docuApi";
 
 const DEFAULT_PAGE_SIZE = 10;
 
 function toStatusLabel(status) {
-  if (typeof status !== "string" || !status.trim()) return "Unknown";
-  return status.trim().split(/[_\s-]+/).filter(Boolean).map(segment => segment.charAt(0).toUpperCase() + segment.slice(1)).join(" ");
+  if (typeof status !== "string" || !status.trim()) {
+    return "Unknown";
+  }
+
+  return status
+    .trim()
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
 }
 
 function toCount(value) {
-  if (Array.isArray(value)) return value.length;
-  if (typeof value === "string") return value.trim() ? 1 : 0;
+  if (Array.isArray(value)) {
+    return value.length;
+  }
+
+  if (typeof value === "string") {
+    return value.trim() ? 1 : 0;
+  }
+
   return 0;
 }
 
 function toDisplayTitle(process) {
-  if (typeof process?.title === "string" && process.title.trim()) return process.title.trim();
-  if (typeof process?.description === "string" && process.description.trim()) return process.description.trim().slice(0, 60);
+  if (typeof process?.title === "string" && process.title.trim()) {
+    return process.title.trim();
+  }
+
+  if (typeof process?.description === "string" && process.description.trim()) {
+    return process.description.trim().slice(0, 60);
+  }
+
   return "Untitled Workspace";
 }
 
 function toDateTime(value) {
-  if (typeof value !== "string" || !value.trim()) return "-";
+  if (typeof value !== "string" || !value.trim()) {
+    return "-";
+  }
+
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(parsed);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed);
 }
 
 function toStatusColor(status) {
   const normalized = (status || "").toLowerCase();
-  if (normalized.includes("fail") || normalized.includes("error") || normalized.includes("delet")) return "bg-red-500";
-  if (normalized.includes("complete") || normalized.includes("success") || normalized.includes("done")) return "bg-emerald-500";
-  if (normalized.includes("progress") || normalized.includes("running") || normalized.includes("processing")) return "bg-violet-500";
+
+  if (normalized.includes("fail") || normalized.includes("error") || normalized.includes("delet")) {
+    return "bg-red-500";
+  }
+
+  if (normalized.includes("complete") || normalized.includes("success") || normalized.includes("done")) {
+    return "bg-emerald-500";
+  }
+
+  if (normalized.includes("progress") || normalized.includes("running") || normalized.includes("processing")) {
+    return "bg-violet-500";
+  }
+
   return "bg-slate-500";
 }
 
-function ChatList() {
+export default function DocuHistoryPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -52,30 +91,52 @@ function ChatList() {
 
   const activeSearch = searchParams?.get("search") || "";
 
-  useEffect(() => { setPage(1); }, [activeSearch]);
+  useEffect(() => {
+    setPage(1);
+  }, [activeSearch]);
 
   useEffect(() => {
     let isMounted = true;
+
     const loadHistory = async () => {
       setLoading(true);
       setError("");
+
       try {
         const payload = await fetchDocuProcessList({ page, pageSize, search: activeSearch });
-        if (!isMounted) return;
-        const records = Array.isArray(payload?.results) ? payload.results : Array.isArray(payload) ? payload : [];
+
+        if (!isMounted) {
+          return;
+        }
+
+        const records = Array.isArray(payload?.results)
+          ? payload.results
+          : Array.isArray(payload)
+            ? payload
+            : [];
+
         setItems(records);
         setCount(typeof payload?.count === "number" ? payload.count : records.length);
       } catch (fetchError) {
-        if (!isMounted) return;
-        setError(fetchError?.message || "Unable to load chat sessions right now.");
+        if (!isMounted) {
+          return;
+        }
+
+        setError(fetchError?.message || "Unable to load history right now.");
         setItems([]);
         setCount(0);
       } finally {
-        if (isMounted) setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
+
     loadHistory();
-    return () => { isMounted = false; };
+
+    return () => {
+      isMounted = false;
+    };
   }, [activeSearch, page, pageSize]);
 
   const totalPages = useMemo(() => {
@@ -83,16 +144,37 @@ function ChatList() {
     return pages > 0 ? pages : 1;
   }, [count, pageSize]);
 
-  const handleStartChat = (projectId) => {
-    if (!projectId) return;
+  const handleViewAgent = (projectId) => {
+    if (!projectId) {
+      return;
+    }
+
     if (typeof window !== "undefined") {
       window.localStorage.setItem(LOCAL_STORAGE_KEYS.projectId, projectId);
     }
+
+    router.push(`/dashboard/workspace?project=${encodeURIComponent(projectId)}`);
+  };
+
+  const handleStartChat = (projectId) => {
+    if (!projectId) {
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(LOCAL_STORAGE_KEYS.projectId, projectId);
+    }
+
     router.push(`/dashboard/chat?project=${encodeURIComponent(projectId)}`);
   };
 
-  const goToPrevious = () => setPage((current) => (current > 1 ? current - 1 : current));
-  const goToNext = () => setPage((current) => (current < totalPages ? current + 1 : current));
+  const goToPrevious = () => {
+    setPage((current) => (current > 1 ? current - 1 : current));
+  };
+
+  const goToNext = () => {
+    setPage((current) => (current < totalPages ? current + 1 : current));
+  };
 
   const handleDelete = async (projectId) => {
     if (!window.confirm("Are you sure you want to delete this process? This cannot be undone.")) return;
@@ -117,24 +199,24 @@ function ChatList() {
       <main className="relative z-10 w-full max-w-5xl mx-auto pt-12 pb-20 px-6">
         <div className="mb-10 text-center animate-in fade-in slide-in-from-top-4">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500/20 to-blue-500/20 border border-violet-500/30 text-violet-400 shadow-[0_0_30px_rgba(139,92,246,0.15)]">
-            <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
           </div>
 
-          <h1 className="text-3xl font-bold tracking-tight text-white">Docu Processes</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-white">DocuHistory Workspace</h1>
           <p className="mt-2 text-slate-400 max-w-xl mx-auto">
-            Select a processed project from your history to start interacting with your documents.
+            Reopen previous runs instantly and continue from where you left off.
           </p>
 
           <div className="mt-5 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-1.5">
             <div className="rounded-lg border border-cyan-400/20 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-100">
-              <span className="text-cyan-200/80">Processes</span>
+              <span className="text-cyan-200/80">Records</span>
               <span className="ml-1.5 text-sm font-bold text-white">{count}</span>
             </div>
             <div className="rounded-lg border border-violet-400/25 bg-violet-500/10 px-3 py-1.5 text-xs text-violet-100">
               <span className="text-violet-200/85">Page</span>
-              <span className="ml-1.5 text-sm font-bold text-white">{page}/{totalPages > 0 ? totalPages : 1}</span>
+              <span className="ml-1.5 text-sm font-bold text-white">{page}/{totalPages}</span>
             </div>
           </div>
         </div>
@@ -153,12 +235,12 @@ function ChatList() {
             <div className="flex min-h-[280px] items-center justify-center">
               <div className="flex items-center gap-3 text-sm text-slate-300">
                 <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-500 border-t-white" />
-                Loading processes...
+                Loading history...
               </div>
             </div>
           ) : items.length === 0 ? (
             <div className="rounded-2xl border border-white/10 bg-black/30 px-6 py-12 text-center text-slate-400">
-              No processes found yet. Start a new process from DocuAgent.
+              No history found yet. Start a new process from DocuAgent.
             </div>
           ) : (
             <div className="space-y-4">
@@ -178,7 +260,7 @@ function ChatList() {
                       <div className="flex items-start lg:items-center gap-4 overflow-hidden min-w-0">
                         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-violet-500/10 text-violet-400 group-hover:bg-violet-500/20 group-hover:text-violet-300 transition-colors border border-white/5 mt-1 lg:mt-0">
                           <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                           </svg>
                         </div>
                         <div className="min-w-0 flex-1">
@@ -201,14 +283,22 @@ function ChatList() {
                       <div className="flex gap-2 w-full lg:w-auto shrink-0 items-center">
                         <button
                           type="button"
+                          onClick={() => handleViewAgent(projectId)}
+                          disabled={!projectId}
+                          className="flex-1 lg:flex-none cursor-pointer rounded-xl bg-violet-500/10 px-4 py-2 text-sm font-semibold text-violet-400 transition-all hover:bg-violet-500/20 hover:text-violet-300 disabled:cursor-not-allowed disabled:opacity-50 border border-violet-500/20"
+                        >
+                          View Agent
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => handleStartChat(projectId)}
                           disabled={!projectId}
-                          className="w-full lg:w-auto cursor-pointer rounded-xl bg-emerald-500/10 px-8 py-2.5 text-sm font-semibold text-emerald-400 transition-all hover:bg-emerald-500/20 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50 border border-emerald-500/20 flex items-center justify-center gap-2 shadow-[0_0_10px_rgba(16,185,129,0.1)] hover:shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+                          className="flex-1 lg:flex-none cursor-pointer rounded-xl bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-400 transition-all hover:bg-emerald-500/20 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50 border border-emerald-500/20 flex items-center justify-center gap-1.5"
                         >
                           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                           </svg>
-                          Start Chat
+                          Chat
                         </button>
                         <button
                           type="button"
@@ -288,144 +378,4 @@ function ChatList() {
       </main>
     </div>
   );
-}
-
-function ChatSession({ projectId }) {
-  const router = useRouter();
-  const [messages, setMessages] = useState([
-    { role: "assistant", content: "Hello! I am DocuChat. You can ask me questions about your documents in this workspace." }
-  ]);
-  const [input, setInput] = useState("");
-  const [recentProjects, setRecentProjects] = useState([]);
-
-  // load recent projects for sidebar
-  useEffect(() => {
-    let isMounted = true;
-    fetchDocuProcessList({ page: 1, pageSize: 15 }).then(res => {
-      if (isMounted) setRecentProjects(res?.results || res || []);
-    }).catch(() => { });
-    return () => { isMounted = false; };
-  }, []);
-
-  const handleSend = (e) => {
-    e.preventDefault();
-    if (!input.trim()) return;
-    setMessages([...messages, { role: "user", content: input }]);
-    setInput("");
-    // simulated reply
-    setTimeout(() => {
-      setMessages(prev => [...prev, { role: "assistant", content: "Chatbot integration via WebSocket is pending backend implementation. Stay tuned!" }]);
-    }, 1000);
-  };
-
-  return (
-    <div className="flex h-[calc(100vh-70px)] w-full overflow-hidden bg-[#0a0a0c] text-slate-200">
-      {/* Sidebar */}
-      <div className="hidden w-72 shrink-0 flex-col border-r border-white/10 bg-[#0f0f14] md:flex z-10 relative">
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/5 px-5">
-          <span className="font-semibold text-slate-200">Recent Processes</span>
-          <button onClick={() => router.push('/dashboard/chat')} className="text-slate-400 hover:text-white transition-colors cursor-pointer" title="New Chat">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-3 space-y-1">
-          {recentProjects.length === 0 ? (
-            <div className="text-xs text-slate-500 px-2 py-3 text-center">Loading...</div>
-          ) : (
-            recentProjects.map(p => (
-              <button
-                key={p.project_id}
-                onClick={() => router.push(`/dashboard/chat?project=${encodeURIComponent(p.project_id)}`)}
-                className={`w-full text-left truncate rounded-xl px-4 py-3 text-sm transition-colors cursor-pointer ${p.project_id === projectId ? 'bg-violet-500/20 text-violet-200 border border-violet-500/20 shadow-[0_0_10px_rgba(139,92,246,0.1)]' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200 border border-transparent'}`}
-              >
-                {p.title || p.description?.slice(0, 40) || 'Untitled'}
-              </button>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* Chat Area */}
-      <div className="flex flex-1 flex-col relative bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-violet-900/10 via-[#0a0a0c] to-[#0a0a0c]">
-        {/* Header */}
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 bg-[#0f0f14]/80 px-4 md:px-6 backdrop-blur-md z-10">
-          <div className="flex items-center min-w-0">
-            <button onClick={() => router.push('/dashboard/chat')} className="mr-3 md:hidden cursor-pointer text-slate-400 hover:text-white transition-colors shrink-0">
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <span className="font-semibold text-white truncate">Chat Session</span>
-            <span className="ml-3 rounded-full bg-white/10 border border-white/5 px-2.5 py-0.5 text-xs text-slate-400 hidden sm:inline-block truncate max-w-[200px]">{projectId}</span>
-          </div>
-          <button className="rounded-lg p-2 cursor-pointer text-slate-400 hover:bg-white/5 hover:text-white transition-colors shrink-0">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
-          <div className="max-w-3xl mx-auto w-full space-y-6 pt-4">
-            {messages.map((m, i) => (
-              <div key={i} className={`flex animate-in slide-in-from-bottom-2 fade-in ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`flex max-w-[85%] md:max-w-[75%] gap-3 ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                  {/* Avatar */}
-                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${m.role === 'user' ? 'bg-violet-600 border-violet-500 shadow-[0_0_10px_rgba(139,92,246,0.3)]' : 'bg-[#0f0f14] border-emerald-500/30 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.1)]'}`}>
-                    {m.role === 'user' ? (
-                      <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
-                    ) : (
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                      </svg>
-                    )}
-                  </div>
-                  {/* Message Bubble */}
-                  <div className={`rounded-2xl px-5 py-3.5 text-sm leading-relaxed ${m.role === 'user' ? 'bg-violet-600 text-white rounded-tr-none shadow-[0_4px_15px_rgba(139,92,246,0.2)]' : 'bg-black/40 text-slate-200 rounded-tl-none border border-white/5 backdrop-blur-md'}`}>
-                    {m.content}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Input Box */}
-        <div className="p-4 md:p-6 shrink-0 relative z-10">
-          <div className="absolute inset-x-0 bottom-full h-12 bg-gradient-to-t from-[#0a0a0c] to-transparent pointer-events-none" />
-          <form onSubmit={handleSend} className="relative flex items-center w-full max-w-3xl mx-auto">
-            <input
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder="Ask anything about your documents..."
-              className="w-full rounded-2xl border border-white/10 bg-[#0f0f14] pl-5 pr-14 py-4 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/50 focus:bg-[#0f0f14] focus:outline-none focus:ring-1 focus:ring-violet-500/50 shadow-2xl"
-            />
-            <button type="submit" disabled={!input.trim()} className="absolute right-2.5 flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl bg-violet-600 text-white disabled:opacity-50 transition-all hover:bg-violet-500 disabled:cursor-not-allowed hover:shadow-[0_0_15px_rgba(139,92,246,0.4)]">
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5m-7 7l7-7 7 7" />
-              </svg>
-            </button>
-          </form>
-          <p className="mt-3 text-center text-[11px] text-slate-500">DocuChat can make mistakes. Consider verifying important information.</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function ChatPage() {
-  const searchParams = useSearchParams();
-  const projectId = searchParams?.get("project");
-
-  if (projectId) {
-    return <ChatSession projectId={projectId} />;
-  }
-
-  return <ChatList />;
 }
