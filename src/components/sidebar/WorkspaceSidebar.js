@@ -108,6 +108,28 @@ function getTypeLabel(extension) {
   return 'File';
 }
 
+function isHiddenIntermediateResultUrl(url) {
+  const fileName = extractFileParts(url).displayName.toLowerCase();
+  return (
+    fileName.includes('refined_question') ||
+    fileName.includes('refined-questions') ||
+    fileName.includes('refined questions')
+  );
+}
+
+function isLikelyFinalAnswerUrl(url) {
+  const fileName = extractFileParts(url).displayName.toLowerCase();
+  if (isHiddenIntermediateResultUrl(url)) {
+    return false;
+  }
+
+  return (
+    fileName.includes('final') ||
+    fileName.includes('answer') ||
+    fileName.includes('output')
+  );
+}
+
 function FileIcon({ url }) {
   const resolved = resolveSourceUrl(url);
   const isImage = resolved.match(/\.(png|jpg|jpeg|webp|bmp)(?:$|\?)/i);
@@ -143,10 +165,15 @@ export default function WorkspaceSidebar({
   activeFile,
   onFileSelect,
 }) {
-  const safeResultUrls = Array.isArray(resultUrls) ? resultUrls : (typeof resultUrls === 'string' && resultUrls.trim() ? [resultUrls] : []);
+  const safeResultUrls =
+    (Array.isArray(resultUrls) ? resultUrls : (typeof resultUrls === 'string' && resultUrls.trim() ? [resultUrls] : []))
+      .filter((url) => !isHiddenIntermediateResultUrl(url))
+      .filter((url) => isLikelyFinalAnswerUrl(url));
   const finalAnswerUrl = safeResultUrls[0] || '';
   const safeReferenceUrls = Array.isArray(referenceUrls) ? referenceUrls : (typeof referenceUrls === 'string' && referenceUrls.trim() ? [referenceUrls] : []);
-  const safeQuestionUrls = Array.isArray(questionUrls) ? questionUrls : (typeof questionUrls === 'string' && questionUrls.trim() ? [questionUrls] : []);
+  const safeQuestionUrls =
+    (Array.isArray(questionUrls) ? questionUrls : (typeof questionUrls === 'string' && questionUrls.trim() ? [questionUrls] : []))
+      .filter((url) => !isHiddenIntermediateResultUrl(url));
   const totalDocuments = safeResultUrls.length + safeReferenceUrls.length + safeQuestionUrls.length;
   const activeFileName = activeFile ? extractFileParts(activeFile).displayName : '';
 

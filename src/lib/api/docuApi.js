@@ -455,3 +455,15 @@ export async function saveGroomingData(projectId, groomingData) {
     "Failed to save grooming data."
   );
 }
+
+export async function fetchGroomingData(projectId) {
+  const nextProjectId = projectId?.trim?.() ?? projectId;
+
+  return agentRequest(
+    `/grooming?project_id=${encodeURIComponent(nextProjectId ?? "")}`,
+    {
+      method: "GET",
+    },
+    "Failed to fetch grooming data."
+  );
+}

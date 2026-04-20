@@ -105,7 +105,7 @@ export default function TopNavbar() {
     if (typeof window !== "undefined") window.localStorage.setItem(LOCAL_STORAGE_KEYS.projectId, projectId);
     setShowDropdown(false);
     setSearchQuery("");
-    router.push(`/dashboard/workspace?project=${encodeURIComponent(projectId)}`);
+    router.push(`/dashboard/workspace?project=${encodeURIComponent(projectId)}&view=graph`);
   };
 
   const handleStartChat = (projectId) => {

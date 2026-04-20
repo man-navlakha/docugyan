@@ -153,7 +153,7 @@ export default function DocuHistoryPage() {
       window.localStorage.setItem(LOCAL_STORAGE_KEYS.projectId, projectId);
     }
 
-    router.push(`/dashboard/workspace?project=${encodeURIComponent(projectId)}`);
+    router.push(`/dashboard/workspace?project=${encodeURIComponent(projectId)}&view=graph`);
   };
 
   const handleStartChat = (projectId) => {

@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import ReactFlow, { Background, Controls, Handle, MarkerType, Position } from "reactflow";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import ReactFlow, { Background, BaseEdge, Controls, Handle, MarkerType, Position, getBezierPath } from "reactflow";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import "reactflow/dist/style.css";
-import { fetchDocuProcessData, saveGroomingData } from "@/lib/api/docuApi";
+import { fetchDocuProcessData, fetchGroomingData, saveGroomingData } from "@/lib/api/docuApi";
 import { useAgentWebSocket } from "@/lib/realtime/useAgentWebSocket";
 import WorkspaceSidebar from "@/components/sidebar/WorkspaceSidebar";
 
@@ -14,134 +14,309 @@ const PIPELINE_NODES = [
   {
     id: "START",
     type: "pipeline",
-    position: { x: 30, y: 210 },
-    data: { label: "START", subtitle: "Pipeline entry" },
+    position: { x: 40, y: 300 },
+    data: { label: "Start", subtitle: "Pipeline entrypoint" },
   },
   {
     id: "Orchestrator_Init",
     type: "pipeline",
-    position: { x: 280, y: 210 },
-    data: { label: "Orchestrator Init", subtitle: "Bootstraps flow" },
+    position: { x: 600, y: 170 },
+    data: { label: "Orchestrator Init", subtitle: "Initializing DocuPipeline" },
   },
   {
-    id: "DocuExtractor_Agent",
+    id: "Extractor_Agent",
     type: "pipeline",
-    position: { x: 550, y: 210 },
-    data: { label: "DocuExtractor Agent", subtitle: "Launches extraction branch" },
+    position: { x: 1120, y: 430 },
+    data: { label: "Extractor Agent", subtitle: "Parallel extraction + refinement" },
   },
   {
-    id: "Extraction_Worker",
+    id: "Extraction_Workers",
     type: "pipeline",
-    position: { x: 840, y: 100 },
-    data: { label: "Extraction Worker", subtitle: "Chunk & extract" },
+    position: { x: 1600, y: 240 },
+    data: { label: "Extraction Workers", subtitle: "Extract reference blobs" },
   },
   {
     id: "Question_Refiner",
     type: "pipeline",
-    position: { x: 840, y: 320 },
-    data: { label: "Question Refiner", subtitle: "Refines question flow" },
+    position: { x: 1600, y: 560 },
+    data: { label: "Question Refiner", subtitle: "Refines original questions" },
   },
   {
-    id: "Vector_DB_Ingestion",
+    id: "RAG_Strategy_Evaluator",
     type: "pipeline",
-    position: { x: 1130, y: 210 },
-    data: { label: "Vector DB Ingestion", subtitle: "Embeds and stores vectors" },
+    position: { x: 2100, y: 170 },
+    data: { label: "RAG Evaluator", subtitle: "Defaults strategy for V1" },
   },
   {
-    id: "Orchestrator_Domain_Router",
+    id: "Ingestion_Router",
     type: "pipeline",
-    position: { x: 1410, y: 210 },
-    data: { label: "Domain Router", subtitle: "Classifies and routes" },
+    position: { x: 2620, y: 430 },
+    data: { label: "Ingestion Router", subtitle: "Routes Vector/Graph/Vectorless" },
+  },
+  {
+    id: "Vector_Ingestor",
+    type: "pipeline",
+    position: { x: 3120, y: 220 },
+    data: { label: "Vector Ingestor", subtitle: "Chunk + embed + upsert" },
+  },
+  {
+    id: "Graph_Ingestor",
+    type: "pipeline",
+    position: { x: 3120, y: 430 },
+    data: { label: "Graph Ingestor", subtitle: "Map entities + relations" },
+  },
+  {
+    id: "Vectorless_Ingestor",
+    type: "pipeline",
+    position: { x: 3120, y: 560 },
+    data: { label: "Vectorless Ingestor", subtitle: "Store raw text" },
+  },
+  {
+    id: "Domain_Evaluator",
+    type: "pipeline",
+    position: { x: 3640, y: 170 },
+    data: { label: "Domain Evaluator", subtitle: "Classify document domain" },
+  },
+  {
+    id: "Specialist_Router",
+    type: "pipeline",
+    position: { x: 4160, y: 430 },
+    data: { label: "Specialist Router", subtitle: "Academic/Financial/Audit" },
   },
   {
     id: "Academic_Agent",
     type: "pipeline",
-    position: { x: 1690, y: 210 },
-    data: { label: "Academic Agent", subtitle: "Domain reasoning" },
+    position: { x: 4680, y: 170 },
+    data: { label: "Academic Agent", subtitle: "Question-solving workflow" },
   },
   {
-    id: "Parallel_Question_Workers",
+    id: "Financial_Agent",
     type: "pipeline",
-    position: { x: 1970, y: 210 },
-    data: { label: "Parallel Workers", subtitle: "Solve in parallel" },
+    position: { x: 4680, y: 430 },
+    data: { label: "Financial Agent", subtitle: "Financial models pathway" },
   },
   {
-    id: "Aggregate_Output",
+    id: "Audit_Agent",
     type: "pipeline",
-    position: { x: 2250, y: 210 },
-    data: { label: "Aggregate Output", subtitle: "Stitch final study guide" },
+    position: { x: 4680, y: 690 },
+    data: { label: "Audit Agent", subtitle: "Compliance/risk pathway" },
+  },
+  {
+    id: "Academic_Workers",
+    type: "pipeline",
+    position: { x: 5200, y: 350 },
+    data: { label: "Academic Workers", subtitle: "Per-question parallel workers" },
+  },
+  {
+    id: "Academic_Aggregator",
+    type: "pipeline",
+    position: { x: 5720, y: 170 },
+    data: { label: "Academic Aggregator", subtitle: "Stitch final study guide" },
+  },
+  {
+    id: "Milvus_Index",
+    type: "pipeline",
+    position: { x: 6240, y: 350 },
+    data: { label: "Milvus Index", subtitle: "Index final Q&A" },
   },
   {
     id: "END",
     type: "pipeline",
-    position: { x: 2530, y: 210 },
-    data: { label: "END", subtitle: "Pipeline complete" },
+    position: { x: 6960, y: 430 },
+    data: { label: "End", subtitle: "Pipeline completed" },
   },
 ];
 
+const EDGE_ARROW_MARKER = {
+  type: MarkerType.ArrowClosed,
+  width: 22,
+  height: 22,
+  color: "#c4b5fd",
+};
+
 const PIPELINE_EDGES = [
-  { id: "e-start-init", source: "START", target: "Orchestrator_Init", markerEnd: { type: MarkerType.ArrowClosed } },
   {
-    id: "e-init-docu",
+    id: "e-start-init",
+    source: "START",
+    target: "Orchestrator_Init",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
+  },
+  {
+    id: "e-init-extractor",
     source: "Orchestrator_Init",
-    target: "DocuExtractor_Agent",
-    markerEnd: { type: MarkerType.ArrowClosed },
+    target: "Extractor_Agent",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
   },
   {
-    id: "e-docu-extraction",
-    source: "DocuExtractor_Agent",
-    target: "Extraction_Worker",
-    markerEnd: { type: MarkerType.ArrowClosed },
+    id: "e-extractor-workers",
+    source: "Extractor_Agent",
+    target: "Extraction_Workers",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
   },
   {
-    id: "e-docu-question",
-    source: "DocuExtractor_Agent",
+    id: "e-extractor-refiner",
+    source: "Extractor_Agent",
     target: "Question_Refiner",
-    markerEnd: { type: MarkerType.ArrowClosed },
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
   },
   {
-    id: "e-extraction-vector",
-    source: "Extraction_Worker",
-    target: "Vector_DB_Ingestion",
-    markerEnd: { type: MarkerType.ArrowClosed },
+    id: "e-workers-rag",
+    source: "Extraction_Workers",
+    target: "RAG_Strategy_Evaluator",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
   },
   {
-    id: "e-question-vector",
+    id: "e-refiner-rag",
     source: "Question_Refiner",
-    target: "Vector_DB_Ingestion",
-    markerEnd: { type: MarkerType.ArrowClosed },
+    target: "RAG_Strategy_Evaluator",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
   },
   {
-    id: "e-vector-router",
-    source: "Vector_DB_Ingestion",
-    target: "Orchestrator_Domain_Router",
-    markerEnd: { type: MarkerType.ArrowClosed },
+    id: "e-rag-router",
+    source: "RAG_Strategy_Evaluator",
+    target: "Ingestion_Router",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
+  },
+  {
+    id: "e-router-vector",
+    source: "Ingestion_Router",
+    target: "Vector_Ingestor",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
+  },
+  {
+    id: "e-router-graph",
+    source: "Ingestion_Router",
+    target: "Graph_Ingestor",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
+  },
+  {
+    id: "e-router-vectorless",
+    source: "Ingestion_Router",
+    target: "Vectorless_Ingestor",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
+  },
+  {
+    id: "e-vector-domain",
+    source: "Vector_Ingestor",
+    target: "Domain_Evaluator",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
+  },
+  {
+    id: "e-graph-domain",
+    source: "Graph_Ingestor",
+    target: "Domain_Evaluator",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
+  },
+  {
+    id: "e-vectorless-domain",
+    source: "Vectorless_Ingestor",
+    target: "Domain_Evaluator",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
+  },
+  {
+    id: "e-domain-router",
+    source: "Domain_Evaluator",
+    target: "Specialist_Router",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
   },
   {
     id: "e-router-academic",
-    source: "Orchestrator_Domain_Router",
+    source: "Specialist_Router",
     target: "Academic_Agent",
-    markerEnd: { type: MarkerType.ArrowClosed },
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
   },
   {
-    id: "e-academic-workers",
+    id: "e-router-financial",
+    source: "Specialist_Router",
+    target: "Financial_Agent",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
+  },
+  {
+    id: "e-router-audit",
+    source: "Specialist_Router",
+    target: "Audit_Agent",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
+  },
+  {
+    id: "e-academic-dispatch",
     source: "Academic_Agent",
-    target: "Parallel_Question_Workers",
-    markerEnd: { type: MarkerType.ArrowClosed },
+    target: "Academic_Workers",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
   },
   {
-    id: "e-workers-aggregate",
-    source: "Parallel_Question_Workers",
-    target: "Aggregate_Output",
-    markerEnd: { type: MarkerType.ArrowClosed },
+    id: "e-academic-aggregate",
+    source: "Academic_Workers",
+    target: "Academic_Aggregator",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
   },
   {
-    id: "e-aggregate-end",
-    source: "Aggregate_Output",
+    id: "e-aggregate-index",
+    source: "Academic_Aggregator",
+    target: "Milvus_Index",
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
+  },
+  {
+    id: "e-index-end",
+    source: "Milvus_Index",
     target: "END",
-    markerEnd: { type: MarkerType.ArrowClosed },
+    type: "pipeline",
+    markerEnd: EDGE_ARROW_MARKER,
+  },
+  {
+    id: "e-financial-end",
+    source: "Financial_Agent",
+    target: "END",
+    type: "pipeline",
+    data: { route: "under" },
+    markerEnd: EDGE_ARROW_MARKER,
+  },
+  {
+    id: "e-audit-end",
+    source: "Audit_Agent",
+    target: "END",
+    type: "pipeline",
+    data: { route: "under-deep" },
+    markerEnd: EDGE_ARROW_MARKER,
   },
 ];
+
+const PRIMARY_STAGE_SEQUENCE = [
+  "START",
+  "Orchestrator_Init",
+  "Extractor_Agent",
+  "RAG_Strategy_Evaluator",
+  "Ingestion_Router",
+  "Vector_Ingestor",
+  "Domain_Evaluator",
+  "Specialist_Router",
+  "Academic_Agent",
+  "Academic_Workers",
+  "Academic_Aggregator",
+  "Milvus_Index",
+  "END",
+];
+
+const PRIMARY_STAGE_SET = new Set(PRIMARY_STAGE_SEQUENCE);
 
 function toTitleCase(value) {
   if (!value) {
@@ -244,6 +419,107 @@ function buildPreviewUrl(url) {
   }
 
   return resolved;
+}
+
+function getResolvedFileName(url) {
+  const resolved = resolveSourceUrl(url);
+  if (!resolved) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(resolved, /^https?:\/\//i.test(resolved) ? undefined : "http://local.preview");
+    return decodeURIComponent(parsed.pathname.split("/").pop() || "").toLowerCase();
+  } catch {
+    const withoutQuery = resolved.split(/[?#]/, 1)[0] || "";
+    try {
+      return decodeURIComponent(withoutQuery.split("/").pop() || "").toLowerCase();
+    } catch {
+      return (withoutQuery.split("/").pop() || "").toLowerCase();
+    }
+  }
+}
+
+function isHiddenIntermediateResultUrl(url) {
+  const fileName = getResolvedFileName(url);
+  if (!fileName) {
+    return false;
+  }
+
+  return (
+    fileName.includes("refined_question") ||
+    fileName.includes("refined-questions") ||
+    fileName.includes("refined questions")
+  );
+}
+
+function filterDisplayableDocumentUrls(urls) {
+  if (!Array.isArray(urls)) {
+    return [];
+  }
+
+  return urls
+    .map((item) => normalizeUrlString(item))
+    .filter(Boolean)
+    .filter((item) => !isHiddenIntermediateResultUrl(item));
+}
+
+function isLikelyFinalAnswerUrl(url) {
+  const fileName = getResolvedFileName(url);
+  if (!fileName) {
+    return false;
+  }
+
+  if (isHiddenIntermediateResultUrl(url)) {
+    return false;
+  }
+
+  return (
+    fileName.includes("final") ||
+    fileName.includes("answer") ||
+    fileName.includes("output")
+  );
+}
+
+function pickPreferredDocumentUrl(candidates) {
+  if (!Array.isArray(candidates)) {
+    return "";
+  }
+
+  for (const candidate of candidates) {
+    const normalized = normalizeUrlString(candidate);
+    if (!normalized || isHiddenIntermediateResultUrl(normalized)) {
+      continue;
+    }
+
+    return normalized;
+  }
+
+  return "";
+}
+
+function pickPreferredFinalAnswerUrl(candidates) {
+  if (!Array.isArray(candidates)) {
+    return "";
+  }
+
+  const normalized = candidates.map((candidate) => normalizeUrlString(candidate)).filter(Boolean);
+  if (normalized.length === 0) {
+    return "";
+  }
+
+  // Trust the explicit final-answer field if present and not blocked.
+  if (!isHiddenIntermediateResultUrl(normalized[0])) {
+    return normalized[0];
+  }
+
+  for (const candidate of normalized) {
+    if (isLikelyFinalAnswerUrl(candidate)) {
+      return candidate;
+    }
+  }
+
+  return "";
 }
 
 function isSafeMarkdownImageUrl(url) {
@@ -461,40 +737,390 @@ function mapLogToActiveNodes(message, eventType) {
   }
 
   if (text.includes("extractor agent: starting parallel document extraction")) {
-    return ["DocuExtractor_Agent", "Extraction_Worker"];
+    return ["Extractor_Agent", "Extraction_Workers"];
+  }
+
+  if (text.includes("extractor agent: no reference urls provided. skipping extraction")) {
+    return ["Extractor_Agent", "Extraction_Workers"];
   }
 
   if (text.includes("extractor agent: starting question refinement")) {
-    return ["Question_Refiner"];
+    return ["Extractor_Agent", "Question_Refiner"];
+  }
+
+  if (text.includes("extractor agent: question refinement complete")) {
+    return ["Question_Refiner", "RAG_Strategy_Evaluator"];
+  }
+
+  if (text.includes("evaluator agent: defaulting to vector strategy")) {
+    return ["RAG_Strategy_Evaluator", "Ingestion_Router"];
+  }
+
+  if (text.includes("orchestrator: routing to vector ingestor")) {
+    return ["Ingestion_Router", "Vector_Ingestor"];
+  }
+
+  if (text.includes("orchestrator: routing to graph ingestor")) {
+    return ["Ingestion_Router", "Graph_Ingestor"];
+  }
+
+  if (text.includes("orchestrator: routing to vectorless ingestor")) {
+    return ["Ingestion_Router", "Vectorless_Ingestor"];
+  }
+
+  if (text.includes("routing to") && text.includes("ingestor")) {
+    if (text.includes("vectorless")) {
+      return ["Ingestion_Router", "Vectorless_Ingestor"];
+    }
+    if (text.includes("graph")) {
+      return ["Ingestion_Router", "Graph_Ingestor"];
+    }
+    if (text.includes("vector")) {
+      return ["Ingestion_Router", "Vector_Ingestor"];
+    }
   }
 
   if (text.includes("vector ingestor: processing chunks")) {
-    return ["Vector_DB_Ingestion"];
+    return ["Vector_Ingestor"];
   }
 
-  if (text.includes("orchestrator: routing to") || text.includes("classifying document domain")) {
-    return ["Orchestrator_Domain_Router"];
+  if (text.includes("vector ingestor: successfully ingested")) {
+    return ["Vector_Ingestor", "Domain_Evaluator"];
+  }
+
+  if (text.includes("vector ingestor")) {
+    return ["Vector_Ingestor"];
+  }
+
+  if (text.includes("graph ingestor: mapping entities")) {
+    return ["Graph_Ingestor", "Domain_Evaluator"];
+  }
+
+  if (text.includes("graph ingestor")) {
+    return ["Graph_Ingestor", "Domain_Evaluator"];
+  }
+
+  if (text.includes("vectorless ingestor: storing raw text data")) {
+    return ["Vectorless_Ingestor", "Domain_Evaluator"];
+  }
+
+  if (text.includes("vectorless ingestor")) {
+    return ["Vectorless_Ingestor", "Domain_Evaluator"];
+  }
+
+  if (text.includes("failed to extract") || text.includes("failed to refine questions")) {
+    return ["Extractor_Agent", "Extraction_Workers", "Question_Refiner"];
+  }
+
+  if (text.includes("evaluator agent: classifying document domain")) {
+    return ["Domain_Evaluator", "Specialist_Router"];
+  }
+
+  if (text.includes("orchestrator: routing to academic specialist agent")) {
+    return ["Specialist_Router", "Academic_Agent"];
+  }
+
+  if (text.includes("academic agent: analyzing theories and citations")) {
+    return ["Specialist_Router", "Academic_Agent"];
+  }
+
+  if (text.includes("orchestrator: routing to financial specialist agent")) {
+    return ["Specialist_Router", "Financial_Agent"];
+  }
+
+  if (text.includes("financial agent")) {
+    return ["Specialist_Router", "Financial_Agent"];
+  }
+
+  if (text.includes("orchestrator: routing to audit specialist agent")) {
+    return ["Specialist_Router", "Audit_Agent"];
+  }
+
+  if (text.includes("audit agent")) {
+    return ["Specialist_Router", "Audit_Agent"];
   }
 
   if (text.includes("academic agent: extracting questions and initiating workers")) {
-    return ["Academic_Agent", "Parallel_Question_Workers"];
+    return ["Academic_Agent", "Academic_Workers"];
   }
 
   if (text.includes("academic agent: stitching final study guide")) {
-    return ["Aggregate_Output"];
+    return ["Academic_Aggregator"];
+  }
+
+  if (text.includes("academic agent complete")) {
+    return ["Academic_Aggregator", "Milvus_Index"];
+  }
+
+  if (text.includes("final q&a successfully indexed in milvus")) {
+    return ["Milvus_Index", "END"];
   }
 
   return null;
 }
 
-function firstNonEmptyString(values, fallback = "") {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
+const SOCKET_NODE_TO_GRAPH_NODE_IDS = {
+  start: ["START"],
+  input: ["START"],
+  orchestrator: ["Orchestrator_Init"],
+  orchestrator_init: ["Orchestrator_Init"],
+  extractor: ["Extractor_Agent"],
+  extractor_agent: ["Extractor_Agent"],
+  vector_rag_ingest: ["Vector_Ingestor"],
+  vector_ingestor: ["Vector_Ingestor"],
+  graph_rag_ingest: ["Graph_Ingestor"],
+  graph_ingestor: ["Graph_Ingestor"],
+  vectorless_ingest: ["Vectorless_Ingestor"],
+  vectorless_ingestor: ["Vectorless_Ingestor"],
+  academic: ["Academic_Agent"],
+  academic_agent: ["Academic_Agent"],
+  financial: ["Financial_Agent"],
+  financial_agent: ["Financial_Agent"],
+  audit: ["Audit_Agent"],
+  audit_agent: ["Audit_Agent"],
+  final: ["END"],
+  final_result: ["END"],
+  end: ["END"],
+  completed: ["END"],
+};
+
+function mapSocketNodeToGraphNodes(currentNode, message, eventType) {
+  const normalizedNode = (currentNode || "").toString().trim().toLowerCase();
+  if (!normalizedNode) {
+    return null;
+  }
+
+  const normalizedMessage = (message || "").toString().toLowerCase();
+  const mappedByMessage = mapLogToActiveNodes(message, eventType);
+  const mappedBase = SOCKET_NODE_TO_GRAPH_NODE_IDS[normalizedNode] || null;
+
+  if (normalizedNode === "orchestrator" || normalizedNode === "orchestrator_init") {
+    return mappedByMessage && mappedByMessage.length > 0 ? mappedByMessage : ["Orchestrator_Init"];
+  }
+
+  if (normalizedNode === "extractor" || normalizedNode === "extractor_agent") {
+    if (normalizedMessage.includes("question refinement")) {
+      return normalizedMessage.includes("complete")
+        ? ["Question_Refiner", "RAG_Strategy_Evaluator"]
+        : ["Extractor_Agent", "Question_Refiner"];
+    }
+
+    if (
+      normalizedMessage.includes("parallel document extraction") ||
+      normalizedMessage.includes("reference extraction") ||
+      normalizedMessage.includes("extracting")
+    ) {
+      return ["Extractor_Agent", "Extraction_Workers"];
+    }
+
+    return ["Extractor_Agent"];
+  }
+
+  if (normalizedNode === "vector_rag_ingest" || normalizedNode === "vector_ingestor") {
+    return ["Ingestion_Router", "Vector_Ingestor"];
+  }
+
+  if (normalizedNode === "graph_rag_ingest" || normalizedNode === "graph_ingestor") {
+    return ["Ingestion_Router", "Graph_Ingestor"];
+  }
+
+  if (normalizedNode === "vectorless_ingest" || normalizedNode === "vectorless_ingestor") {
+    return ["Ingestion_Router", "Vectorless_Ingestor"];
+  }
+
+  if (normalizedNode === "academic" || normalizedNode === "academic_agent") {
+    if (normalizedMessage.includes("initiating workers") || normalizedMessage.includes("dispatching workers")) {
+      return ["Academic_Agent", "Academic_Workers"];
+    }
+
+    if (normalizedMessage.includes("stitching final study guide") || normalizedMessage.includes("stitch")) {
+      return ["Academic_Aggregator"];
+    }
+
+    if (normalizedMessage.includes("academic agent complete")) {
+      return ["Academic_Aggregator", "Milvus_Index"];
+    }
+
+    if (normalizedMessage.includes("indexed in milvus")) {
+      return ["Milvus_Index", "END"];
+    }
+
+    return ["Specialist_Router", "Academic_Agent"];
+  }
+
+  if (normalizedNode === "financial" || normalizedNode === "financial_agent") {
+    return ["Specialist_Router", "Financial_Agent"];
+  }
+
+  if (normalizedNode === "audit" || normalizedNode === "audit_agent") {
+    return ["Specialist_Router", "Audit_Agent"];
+  }
+
+  if (normalizedNode === "end" || normalizedNode === "final" || normalizedNode === "final_result" || normalizedNode === "completed") {
+    return mappedByMessage && mappedByMessage.length > 0 ? mappedByMessage : ["END"];
+  }
+
+  return mappedBase && mappedBase.length > 0 ? mappedBase : mappedByMessage && mappedByMessage.length > 0 ? mappedByMessage : null;
+}
+
+function mapSocketStatusToNodeStatus(statusValue, eventType, logType) {
+  const normalizedStatus = (statusValue || "").toString().trim().toLowerCase();
+  const normalizedEventType = (eventType || "").toString().trim().toLowerCase();
+  const normalizedLogType = (logType || "").toString().trim().toLowerCase();
+  const merged = `${normalizedStatus} ${normalizedEventType} ${normalizedLogType}`;
+
+  if (merged.includes("error") || merged.includes("failed")) {
+    return "failed";
+  }
+
+  if (merged.includes("complete") || merged.includes("completed") || merged.includes("done") || merged.includes("success")) {
+    return "success";
+  }
+
+  if (
+    normalizedStatus.includes("processing") ||
+    normalizedStatus.includes("progress") ||
+    normalizedStatus.includes("running") ||
+    normalizedStatus.includes("started") ||
+    normalizedStatus.includes("start") ||
+    normalizedStatus.includes("pending")
+  ) {
+    return "processing";
+  }
+
+  if (normalizedEventType === "message" || normalizedLogType === "message") {
+    return "processing";
+  }
+
+  return "idle";
+}
+
+function truncateActivityText(value, max = 88) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  if (normalized.length <= max) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, max - 1).trim()}…`;
+}
+
+const NODE_SOCKET_HISTORY_LIMIT = 80;
+const GRAPH_GROOMING_REPLAY_STEP_MS = 920;
+const NODE_STATUS_PRIORITY = {
+  idle: 0,
+  success: 1,
+  processing: 2,
+  failed: 3,
+};
+
+function normalizeNodeStatus(value) {
+  const next = (value || "").toString().trim().toLowerCase();
+  if (next === "failed" || next === "processing" || next === "success" || next === "idle") {
+    return next;
+  }
+  return "idle";
+}
+
+function chooseNodeStatus(previousStatus, nextStatus) {
+  const prev = normalizeNodeStatus(previousStatus);
+  const next = normalizeNodeStatus(nextStatus);
+  return NODE_STATUS_PRIORITY[next] >= NODE_STATUS_PRIORITY[prev] ? next : prev;
+}
+
+function sanitizeNodeStatusById(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const normalized = {};
+  for (const [nodeId, status] of Object.entries(value)) {
+    if (typeof nodeId !== "string" || !nodeId.trim()) {
+      continue;
+    }
+
+    const nextStatus = normalizeNodeStatus(status);
+    if (nextStatus !== "idle") {
+      normalized[nodeId] = nextStatus;
     }
   }
 
-  return fallback;
+  return normalized;
+}
+
+function sanitizeNodeSocketMessagesById(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const normalized = {};
+  for (const [nodeId, entries] of Object.entries(value)) {
+    if (typeof nodeId !== "string" || !nodeId.trim() || !Array.isArray(entries)) {
+      continue;
+    }
+
+    const nextEntries = entries
+      .filter((entry) => entry && typeof entry === "object")
+      .map((entry, index) => {
+        const message = typeof entry.message === "string" ? entry.message.trim() : "";
+        if (!message) {
+          return null;
+        }
+
+        const type = typeof entry.type === "string" && entry.type.trim() ? entry.type.trim().toLowerCase() : "message";
+        const eventType =
+          typeof entry.eventType === "string" && entry.eventType.trim() ? entry.eventType.trim().toLowerCase() : type;
+        const currentNode =
+          typeof entry.currentNode === "string" && entry.currentNode.trim() ? entry.currentNode.trim().toLowerCase() : "";
+        const status = typeof entry.status === "string" && entry.status.trim() ? entry.status.trim().toLowerCase() : "";
+        const at = typeof entry.at === "string" && entry.at.trim() ? entry.at.trim() : "";
+        const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : `${nodeId}-${index}`;
+
+        return { id, type, eventType, currentNode, status, message, at };
+      })
+      .filter(Boolean)
+      .slice(-NODE_SOCKET_HISTORY_LIMIT);
+
+    if (nextEntries.length > 0) {
+      normalized[nodeId] = nextEntries;
+    }
+  }
+
+  return normalized;
+}
+
+function mergeNodeSocketMessages(previous, additions) {
+  const next = { ...(previous || {}) };
+
+  for (const [nodeId, entries] of Object.entries(additions || {})) {
+    const existingEntries = Array.isArray(next[nodeId]) ? next[nodeId] : [];
+    const seen = new Set(existingEntries.map((entry) => entry.id));
+    const mergedEntries = [...existingEntries];
+
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+
+      if (seen.has(entry.id)) {
+        continue;
+      }
+
+      mergedEntries.push(entry);
+      seen.add(entry.id);
+    }
+
+    next[nodeId] = mergedEntries.slice(-NODE_SOCKET_HISTORY_LIMIT);
+  }
+
+  return next;
 }
 
 function areStringArraysEqual(a, b) {
@@ -515,8 +1141,109 @@ function areStringArraysEqual(a, b) {
   return true;
 }
 
+function areNodeStatusMapsEqual(a, b) {
+  const normalizedA = sanitizeNodeStatusById(a);
+  const normalizedB = sanitizeNodeStatusById(b);
+  const keysA = Object.keys(normalizedA);
+  const keysB = Object.keys(normalizedB);
+
+  if (keysA.length !== keysB.length) {
+    return false;
+  }
+
+  for (const key of keysA) {
+    if (normalizedA[key] !== normalizedB[key]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function areNodeSocketMessageMapsEqual(a, b) {
+  const normalizedA = sanitizeNodeSocketMessagesById(a);
+  const normalizedB = sanitizeNodeSocketMessagesById(b);
+  const keysA = Object.keys(normalizedA);
+  const keysB = Object.keys(normalizedB);
+
+  if (keysA.length !== keysB.length) {
+    return false;
+  }
+
+  for (const key of keysA) {
+    const entriesA = normalizedA[key] || [];
+    const entriesB = normalizedB[key] || [];
+
+    if (entriesA.length !== entriesB.length) {
+      return false;
+    }
+
+    for (let index = 0; index < entriesA.length; index += 1) {
+      const left = entriesA[index];
+      const right = entriesB[index];
+
+      if (
+        left.id !== right.id ||
+        left.type !== right.type ||
+        left.eventType !== right.eventType ||
+        left.currentNode !== right.currentNode ||
+        left.status !== right.status ||
+        left.message !== right.message ||
+        left.at !== right.at
+      ) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 function mergeUniqueNodes(previous, additions) {
   return Array.from(new Set([...(Array.isArray(previous) ? previous : []), ...(Array.isArray(additions) ? additions : [])]));
+}
+
+function getBootstrapPathForNode(nodeId) {
+  const extractionPrelude = ["Orchestrator_Init", "Extractor_Agent", "Extraction_Workers", "Question_Refiner"];
+
+  if (nodeId === "Extraction_Workers") {
+    return ["Orchestrator_Init", "Extractor_Agent", "Extraction_Workers"];
+  }
+
+  if (nodeId === "Question_Refiner") {
+    return ["Orchestrator_Init", "Extractor_Agent", "Question_Refiner"];
+  }
+
+  if (PRIMARY_STAGE_SET.has(nodeId)) {
+    const stageIndex = PRIMARY_STAGE_SEQUENCE.indexOf(nodeId);
+    if (stageIndex <= 2) {
+      return PRIMARY_STAGE_SEQUENCE.slice(1, stageIndex + 1);
+    }
+
+    const primaryTail = PRIMARY_STAGE_SEQUENCE.slice(3, stageIndex + 1);
+    return mergeUniqueNodes(extractionPrelude, primaryTail);
+  }
+
+  if (nodeId === "Graph_Ingestor" || nodeId === "Vectorless_Ingestor") {
+    return [...extractionPrelude, "RAG_Strategy_Evaluator", "Ingestion_Router", nodeId];
+  }
+
+  if (nodeId === "Financial_Agent" || nodeId === "Audit_Agent") {
+    return [...extractionPrelude, "RAG_Strategy_Evaluator", "Ingestion_Router", "Vector_Ingestor", "Domain_Evaluator", "Specialist_Router", nodeId];
+  }
+
+  return [];
+}
+
+function buildBootstrapProgressNodes(nodeIds) {
+  const normalizedNodeIds = Array.isArray(nodeIds) ? nodeIds : [];
+  const bootstrap = [];
+
+  for (const nodeId of normalizedNodeIds) {
+    bootstrap.push(...getBootstrapPathForNode(nodeId));
+  }
+
+  return mergeUniqueNodes(bootstrap, normalizedNodeIds);
 }
 
 function getGraphStateStorageKey(projectId) {
@@ -657,6 +1384,10 @@ function normalizeProcessData(payload) {
   const resultUrls = findUrlListByKeys(objects, ["result_urls", "resultUrls", "result_url", "results", "output_urls", "output_url"]);
   const referenceUrls = findUrlListByKeys(objects, ["reference_urls", "referenceUrls", "reference_url", "references"]);
   const questionUrls = findUrlListByKeys(objects, ["question_urls", "questionUrls", "question_url", "questions"]);
+  const filteredResultUrls = filterDisplayableDocumentUrls(resultUrls);
+  const finalResultUrls = filteredResultUrls.filter((url) => isLikelyFinalAnswerUrl(url));
+  const filteredQuestionUrls = filterDisplayableDocumentUrls(questionUrls);
+  const preferredFinalAnswerUrl = pickPreferredFinalAnswerUrl([finalAnswerUrl, ...finalResultUrls]);
   const groomingData = root.grooming_data || objects.find((o) => isObject(o.grooming_data))?.grooming_data || null;
 
   return {
@@ -664,36 +1395,290 @@ function normalizeProcessData(payload) {
     title,
     description,
     status: processStatus,
-    final_answer_url: finalAnswerUrl,
-    result_urls: resultUrls,
+    final_answer_url: preferredFinalAnswerUrl,
+    result_urls: finalResultUrls,
     reference_urls: referenceUrls,
-    question_urls: questionUrls,
+    question_urls: filteredQuestionUrls,
     grooming_data: groomingData,
   };
 }
 
+function getNodeVisualType(nodeId) {
+  if (nodeId === "START") {
+    return "start";
+  }
+  if (nodeId === "END") {
+    return "end";
+  }
+  if (nodeId.includes("Router")) {
+    return "router";
+  }
+  if (nodeId.includes("Ingestor") || nodeId.includes("Milvus")) {
+    return "database";
+  }
+  if (nodeId.includes("Evaluator")) {
+    return "evaluator";
+  }
+  if (nodeId.includes("Workers")) {
+    return "workers";
+  }
+  if (nodeId.includes("Refiner")) {
+    return "refiner";
+  }
+  if (nodeId.includes("Aggregator")) {
+    return "aggregate";
+  }
+  return "agent";
+}
+
+function NodeVisualIcon({ nodeId }) {
+  const iconType = getNodeVisualType(nodeId || "");
+
+  if (iconType === "start") {
+    return (
+      <svg viewBox="0 0 24 24" className="node-visual-svg" fill="currentColor" aria-hidden="true">
+        <path d="M8 5.5v13l10-6.5-10-6.5z" />
+      </svg>
+    );
+  }
+
+  if (iconType === "end") {
+    return (
+      <svg viewBox="0 0 24 24" className="node-visual-svg" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+        <path d="M5 12l4 4 10-10" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+
+  if (iconType === "database") {
+    return (
+      <svg viewBox="0 0 24 24" className="node-visual-svg" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
+        <ellipse cx="12" cy="6" rx="7" ry="3" />
+        <path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" />
+        <path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+      </svg>
+    );
+  }
+
+  if (iconType === "router") {
+    return (
+      <svg viewBox="0 0 24 24" className="node-visual-svg" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
+        <circle cx="6" cy="6" r="2" />
+        <circle cx="18" cy="6" r="2" />
+        <circle cx="12" cy="18" r="2" />
+        <path d="M8 6h8" />
+        <path d="M7 8l4 8" />
+        <path d="M17 8l-4 8" />
+      </svg>
+    );
+  }
+
+  if (iconType === "evaluator") {
+    return (
+      <svg viewBox="0 0 24 24" className="node-visual-svg" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
+        <circle cx="11" cy="11" r="5" />
+        <path d="M16 16l4 4" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (iconType === "workers") {
+    return (
+      <svg viewBox="0 0 24 24" className="node-visual-svg" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+        <circle cx="9" cy="9" r="2.5" />
+        <circle cx="16" cy="10" r="2" />
+        <path d="M5.5 17c.9-2.4 2.3-3.5 4.5-3.5s3.5 1.1 4.2 3.5" />
+        <path d="M14.2 17c.5-1.5 1.3-2.3 2.8-2.3 1.2 0 2 .5 2.5 1.7" />
+      </svg>
+    );
+  }
+
+  if (iconType === "refiner") {
+    return (
+      <svg viewBox="0 0 24 24" className="node-visual-svg" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+        <path d="M4 7h16" strokeLinecap="round" />
+        <path d="M7 12h10" strokeLinecap="round" />
+        <path d="M10 17h4" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (iconType === "aggregate") {
+    return (
+      <svg viewBox="0 0 24 24" className="node-visual-svg" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
+        <path d="M6 7l6 6" strokeLinecap="round" />
+        <path d="M18 7l-6 6" strokeLinecap="round" />
+        <path d="M12 13v5" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" className="node-visual-svg" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
+      <path d="M9 3h6" strokeLinecap="round" />
+      <rect x="6" y="7" width="12" height="10" rx="3" />
+      <circle cx="10" cy="12" r="1" fill="currentColor" />
+      <circle cx="14" cy="12" r="1" fill="currentColor" />
+      <path d="M9.5 15h5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function getRoutedEdgePath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, route }) {
+  if (route === "under" || route === "under-deep") {
+    const horizontalSpan = Math.max(280, Math.abs(targetX - sourceX) * 0.34);
+    const dipDepth = route === "under-deep" ? 380 : 300;
+    const controlY = Math.max(sourceY, targetY) + dipDepth;
+    const control1X = sourceX + horizontalSpan;
+    const control2X = targetX - horizontalSpan;
+    return `M ${sourceX},${sourceY} C ${control1X},${controlY} ${control2X},${controlY} ${targetX},${targetY}`;
+  }
+
+  const [edgePath] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  });
+
+  return edgePath;
+}
+
+function PipelineEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+  data,
+}) {
+  const edgePath = getRoutedEdgePath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+    route: data?.route,
+  });
+
+  const edgeState = data?.edgeState || "idle";
+  const isFailed = edgeState === "failed";
+  const isActive = edgeState === "active";
+  const isVisited = edgeState === "visited";
+
+  const stroke = isFailed
+    ? "rgba(248,113,113,0.95)"
+    : isActive
+    ? "rgba(139,92,246,0.95)"
+    : isVisited
+    ? "rgba(196,181,253,0.9)"
+    : "rgba(148,163,184,0.38)";
+  const strokeWidth = isActive ? 3.1 : isVisited || isFailed ? 2.55 : 1.75;
+
+  return (
+    <>
+      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={{ stroke, strokeWidth, strokeLinecap: "round", strokeLinejoin: "round" }} />
+
+      {isActive && (
+        <>
+          <circle r="4.6" className="edge-packet">
+            <animateMotion dur="3.2s" repeatCount="indefinite" path={edgePath} />
+          </circle>
+          <circle r="3.4" className="edge-packet-secondary">
+            <animateMotion dur="3.2s" begin="-1.6s" repeatCount="indefinite" path={edgePath} />
+          </circle>
+        </>
+      )}
+
+      {isVisited && !isActive && !isFailed && (
+        <circle r="2.9" className="edge-packet-visited">
+          <animateMotion dur="4.8s" repeatCount="indefinite" path={edgePath} />
+        </circle>
+      )}
+
+      {isFailed && (
+        <circle r="4.2" className="edge-packet-failed">
+          <animateMotion dur="1.6s" repeatCount="indefinite" path={edgePath} />
+        </circle>
+      )}
+    </>
+  );
+}
+
 function PipelineNode({ data }) {
   const nodeState = data?.nodeState || "idle";
+  const nodeId = data?.nodeId || "";
+  const stepIndex = Number.isInteger(data?.stepIndex) ? data.stepIndex : -1;
+  const isPrimaryStage = Boolean(data?.isPrimaryStage);
+  const isSelected = Boolean(data?.isSelected);
   const isFailed = nodeState === "failed";
   const isActive = nodeState === "active";
+  const isVisited = nodeState === "visited";
 
   return (
     <div
-      className={`w-[220px] rounded-2xl border px-4 py-3 backdrop-blur-xl transition-all duration-300 ${
+      className={`relative w-[380px] rounded-2xl border px-6 py-5 backdrop-blur-xl transition-all duration-300 ${
         isFailed
           ? "border-red-400/80 bg-red-500/15 ring-1 ring-red-300/70 shadow-[0_0_34px_rgba(248,113,113,0.45)] node-failed-glow"
           : isActive
-          ? "border-violet-400/80 bg-violet-500/15 ring-1 ring-violet-300/70 shadow-[0_0_34px_rgba(139,92,246,0.45)] node-active-glow"
+          ? "border-violet-400/80 bg-violet-500/15 ring-1 ring-violet-200/70 shadow-[0_0_34px_rgba(139,92,246,0.4)] node-active-glow"
+          : isVisited
+          ? "border-violet-300/70 bg-violet-500/10 ring-1 ring-violet-300/45 node-visited-glow"
           : "border-white/15 bg-white/[0.04]"
-      }`}
+      } ${isSelected ? "ring-2 ring-violet-200/80 shadow-[0_0_26px_rgba(167,139,250,0.38)]" : ""}`}
     >
-      <p className="text-sm font-semibold text-white">{data.label}</p>
-      <p className="mt-1 text-[11px] uppercase tracking-widest text-slate-400">{data.subtitle}</p>
-      {(isActive || isFailed) && (
-        <span className={`mt-2 inline-flex items-center gap-1 text-[11px] font-semibold ${isFailed ? "text-red-200" : "text-violet-200"}`}>
-          <span className={`h-1.5 w-1.5 rounded-full animate-pulse ${isFailed ? "bg-red-300" : "bg-violet-300"}`} />
-          {isFailed ? "Failed" : "Active"}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex items-start gap-3">
+          <div className={`node-avatar ${isFailed ? "node-avatar-failed" : isActive ? "node-avatar-active" : isVisited ? "node-avatar-visited" : "node-avatar-idle"}`}>
+            <span className="node-avatar-ring" />
+            <span className="node-avatar-icon" aria-hidden="true">
+              <NodeVisualIcon nodeId={nodeId} />
+            </span>
+          </div>
+
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="truncate text-[1.12rem] font-semibold leading-none text-white">{data.label}</p>
+              <span className="node-ai-chip">AI</span>
+            </div>
+            <p className="mt-1.5 text-[13px] uppercase tracking-widest text-slate-300/80">{data.subtitle}</p>
+          </div>
+        </div>
+
+        {isPrimaryStage && (
+          <span className="node-step-badge" title={`Main Flow Step ${stepIndex + 1}`}>
+            {String(stepIndex + 1).padStart(2, "0")}
+          </span>
+        )}
+      </div>
+
+      {(isActive || isFailed || isVisited) && (
+        <span
+          className={`mt-3 inline-flex items-center gap-1 text-[13px] font-semibold ${
+            isFailed ? "text-red-200" : isActive ? "text-violet-100" : "text-violet-200"
+          }`}
+        >
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              isFailed ? "bg-red-300" : isActive ? "bg-violet-300 animate-pulse" : "bg-violet-300"
+            }`}
+          />
+          {isFailed ? "Failed" : isActive ? "Running" : "Visited"}
         </span>
+      )}
+
+      {isActive && (
+        <div className="node-processing-bars" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
       )}
 
       <Handle type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-2 !border-slate-900 !bg-slate-300" />
@@ -703,16 +1688,36 @@ function PipelineNode({ data }) {
 }
 
 const nodeTypes = { pipeline: PipelineNode };
+const edgeTypes = { pipeline: PipelineEdge };
 
 export default function WorkspacePage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("project") || "";
+  const viewParam = (searchParams.get("view") || "").toString().toLowerCase();
+  const forceGraphView = viewParam === "graph";
 
   const [activeView, setActiveView] = useState("graph");
   const [currentNodeIds, setCurrentNodeIds] = useState(["START"]);
   const [visitedNodeIds, setVisitedNodeIds] = useState(["START"]);
   const [failedNodeIds, setFailedNodeIds] = useState([]);
+  const [displayCurrentNodeIds, setDisplayCurrentNodeIds] = useState(["START"]);
+  const [displayVisitedNodeIds, setDisplayVisitedNodeIds] = useState(["START"]);
+  const [displayFailedNodeIds, setDisplayFailedNodeIds] = useState([]);
+  const [isGraphReplayRunning, setIsGraphReplayRunning] = useState(false);
+  const [graphReplayRequestId, setGraphReplayRequestId] = useState(0);
+  const [nodeStatusById, setNodeStatusById] = useState({});
+  const [nodeSocketMessagesById, setNodeSocketMessagesById] = useState({});
+  const [selectedNodeId, setSelectedNodeId] = useState("");
   const currentNodeIdsRef = useRef(["START"]);
+  const replayCurrentNodeIdsRef = useRef(["START"]);
+  const replayVisitedNodeIdsRef = useRef(["START"]);
+  const replayFailedNodeIdsRef = useRef([]);
+  const processedSocketLogIdsRef = useRef(new Set());
+  const completedEventAppliedRef = useRef(false);
+  const graphReplayTimerRef = useRef(null);
+  const groomingSyncRequestIdRef = useRef(0);
   const [processData, setProcessData] = useState(null);
   const [loadingData, setLoadingData] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -723,9 +1728,83 @@ export default function WorkspacePage() {
   const [markdownImageUrlByToken, setMarkdownImageUrlByToken] = useState({});
   const markdownObjectUrlsRef = useRef([]);
 
-  const { connectionState, logs, status, lastEventType, finalAnswerUrl } = useAgentWebSocket(projectId, {
+  const { logs, status, lastEventType, finalAnswerUrl, clearLogs } = useAgentWebSocket(projectId, {
     enabled: Boolean(projectId),
   });
+
+  useEffect(() => {
+    if (!forceGraphView) {
+      return;
+    }
+
+    setActiveView("graph");
+  }, [forceGraphView, projectId]);
+
+  useEffect(() => {
+    if (!projectId || !pathname) {
+      return;
+    }
+
+    const desiredView = activeView === "document" ? "document" : "graph";
+    if (viewParam === desiredView) {
+      return;
+    }
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set("project", projectId);
+    nextParams.set("view", desiredView);
+    router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
+  }, [activeView, pathname, projectId, router, searchParams, viewParam]);
+
+  useEffect(() => {
+    clearLogs();
+    setCurrentNodeIds(["START"]);
+    setVisitedNodeIds(["START"]);
+    setFailedNodeIds([]);
+    setDisplayCurrentNodeIds(["START"]);
+    setDisplayVisitedNodeIds(["START"]);
+    setDisplayFailedNodeIds([]);
+    setIsGraphReplayRunning(false);
+    setNodeStatusById({});
+    setNodeSocketMessagesById({});
+    setSelectedNodeId("");
+    setGraphReplayRequestId((prev) => prev + 1);
+    currentNodeIdsRef.current = ["START"];
+    replayCurrentNodeIdsRef.current = ["START"];
+    replayVisitedNodeIdsRef.current = ["START"];
+    replayFailedNodeIdsRef.current = [];
+    processedSocketLogIdsRef.current = new Set();
+    completedEventAppliedRef.current = false;
+    groomingSyncRequestIdRef.current = 0;
+
+    if (graphReplayTimerRef.current && typeof window !== "undefined") {
+      window.clearInterval(graphReplayTimerRef.current);
+      graphReplayTimerRef.current = null;
+    }
+  }, [clearLogs, projectId]);
+
+  useEffect(() => {
+    if (isGraphReplayRunning) {
+      return;
+    }
+
+    const normalizedDisplayStatus = (status || processData?.status || lastEventType || "").toString().toLowerCase();
+    const isTerminalLike =
+      normalizedDisplayStatus.includes("complete") ||
+      normalizedDisplayStatus.includes("completed") ||
+      normalizedDisplayStatus.includes("done") ||
+      normalizedDisplayStatus.includes("success") ||
+      normalizedDisplayStatus.includes("failed") ||
+      normalizedDisplayStatus.includes("error");
+
+    if (activeView === "graph" && !isTerminalLike) {
+      return;
+    }
+
+    setDisplayCurrentNodeIds(currentNodeIds);
+    setDisplayVisitedNodeIds(visitedNodeIds);
+    setDisplayFailedNodeIds(failedNodeIds);
+  }, [activeView, currentNodeIds, failedNodeIds, isGraphReplayRunning, lastEventType, processData?.status, status, visitedNodeIds]);
 
   useEffect(() => {
     if (!projectId) {
@@ -751,7 +1830,10 @@ export default function WorkspacePage() {
         setProcessData(normalizedPayload);
 
         const initialDoc =
-          normalizedPayload?.result_urls?.[0] || normalizedPayload?.reference_urls?.[0] || normalizedPayload?.question_urls?.[0] || "";
+          pickPreferredFinalAnswerUrl([normalizedPayload?.final_answer_url, ...(normalizedPayload?.result_urls || [])]) ||
+          normalizedPayload?.reference_urls?.[0] ||
+          normalizedPayload?.question_urls?.[0] ||
+          "";
         setActiveDocumentUrl(initialDoc);
       } catch (error) {
         if (!canceled) {
@@ -773,75 +1855,227 @@ export default function WorkspacePage() {
   }, [projectId]);
 
   useEffect(() => {
-    const normalizedStatus = (status || processData?.status || "").toLowerCase();
-    if (normalizedStatus.includes("complete") || normalizedStatus.includes("done") || normalizedStatus.includes("success")) {
+    if (forceGraphView) {
+      return;
+    }
+
+    const completionSignals = [(processData?.status || "").toLowerCase(), (lastEventType || "").toLowerCase()];
+    const isCompleted = completionSignals.some(
+      (value) => value.includes("complete") || value.includes("completed") || value.includes("done") || value.includes("success")
+    );
+    if (isCompleted) {
       setActiveView("document");
     }
-  }, [processData?.status, status]);
+  }, [forceGraphView, lastEventType, processData?.status]);
 
   useEffect(() => {
-    const completionStatus = (status || processData?.status || lastEventType || "").toString().toLowerCase();
-    const isCompleted =
-      completionStatus.includes("complete") || completionStatus.includes("completed") || completionStatus.includes("done") || completionStatus.includes("success");
+    if (activeView !== "graph") {
+      if (graphReplayTimerRef.current && typeof window !== "undefined") {
+        window.clearInterval(graphReplayTimerRef.current);
+        graphReplayTimerRef.current = null;
+      }
+      setIsGraphReplayRunning(false);
+      return;
+    }
 
-    const liveFinalAnswerUrl = resolveSourceUrl(finalAnswerUrl || processData?.final_answer_url || "");
+    setGraphReplayRequestId((prev) => prev + 1);
+  }, [activeView]);
+
+  useEffect(
+    () => () => {
+      if (graphReplayTimerRef.current && typeof window !== "undefined") {
+        window.clearInterval(graphReplayTimerRef.current);
+        graphReplayTimerRef.current = null;
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (activeView !== "graph" || !projectId || loadingData) {
+      return;
+    }
+
+    const targetVisited = sanitizeNodeIdList(replayVisitedNodeIdsRef.current, ["START"]);
+    const targetCurrent = sanitizeNodeIdList(replayCurrentNodeIdsRef.current, ["START"]);
+    const targetFailed = sanitizeNodeIdList(replayFailedNodeIdsRef.current, []);
+
+    if (targetVisited.length <= 1) {
+      setDisplayVisitedNodeIds(targetVisited);
+      setDisplayCurrentNodeIds(targetCurrent);
+      setDisplayFailedNodeIds(targetFailed);
+      setIsGraphReplayRunning(false);
+      return;
+    }
+
+    setIsGraphReplayRunning(true);
+    setDisplayVisitedNodeIds([targetVisited[0] || "START"]);
+    setDisplayCurrentNodeIds([targetVisited[0] || "START"]);
+    setDisplayFailedNodeIds([]);
+
+    let index = 1;
+    graphReplayTimerRef.current = window.setInterval(() => {
+      if (index >= targetVisited.length) {
+        if (graphReplayTimerRef.current) {
+          window.clearInterval(graphReplayTimerRef.current);
+          graphReplayTimerRef.current = null;
+        }
+
+        setDisplayVisitedNodeIds(targetVisited);
+        setDisplayCurrentNodeIds(targetCurrent);
+        setDisplayFailedNodeIds(targetFailed);
+        setIsGraphReplayRunning(false);
+        return;
+      }
+
+      const nextNodeId = targetVisited[index];
+      index += 1;
+
+      setDisplayVisitedNodeIds((prev) => mergeUniqueNodes(prev, [nextNodeId]));
+      setDisplayCurrentNodeIds([nextNodeId]);
+      if (targetFailed.includes(nextNodeId)) {
+        setDisplayFailedNodeIds((prev) => mergeUniqueNodes(prev, [nextNodeId]));
+      }
+    }, GRAPH_GROOMING_REPLAY_STEP_MS);
+
+    return () => {
+      if (graphReplayTimerRef.current) {
+        window.clearInterval(graphReplayTimerRef.current);
+        graphReplayTimerRef.current = null;
+      }
+    };
+  }, [activeView, graphReplayRequestId, loadingData, projectId]);
+
+  useEffect(() => {
+    if (activeView !== "graph" || isGraphReplayRunning) {
+      return;
+    }
+
+    if (graphReplayTimerRef.current) {
+      return;
+    }
+
+    const targetVisited = sanitizeNodeIdList(visitedNodeIds, ["START"]);
+    const targetCurrent = sanitizeNodeIdList(currentNodeIds, ["START"]);
+    const targetFailed = sanitizeNodeIdList(failedNodeIds, []);
+    const currentDisplayVisited = sanitizeNodeIdList(displayVisitedNodeIds, ["START"]);
+    const currentDisplayCurrent = sanitizeNodeIdList(displayCurrentNodeIds, ["START"]);
+    const currentDisplayFailed = sanitizeNodeIdList(displayFailedNodeIds, []);
+
+    const needsVisitedProgress = targetVisited.length > currentDisplayVisited.length;
+    const currentNodeDiffers = !areStringArraysEqual(currentDisplayCurrent, targetCurrent);
+    const failedDiffers = !areStringArraysEqual(currentDisplayFailed, targetFailed);
+
+    if (!needsVisitedProgress && !currentNodeDiffers && !failedDiffers) {
+      return;
+    }
+
+    setIsGraphReplayRunning(true);
+
+    let index = Math.max(1, currentDisplayVisited.length);
+    graphReplayTimerRef.current = window.setInterval(() => {
+      if (index >= targetVisited.length) {
+        if (graphReplayTimerRef.current) {
+          window.clearInterval(graphReplayTimerRef.current);
+          graphReplayTimerRef.current = null;
+        }
+
+        setDisplayVisitedNodeIds(targetVisited);
+        setDisplayCurrentNodeIds(targetCurrent);
+        setDisplayFailedNodeIds(targetFailed);
+        setIsGraphReplayRunning(false);
+        return;
+      }
+
+      const nextNodeId = targetVisited[index];
+      index += 1;
+
+      setDisplayVisitedNodeIds((prev) => mergeUniqueNodes(prev, [nextNodeId]));
+      setDisplayCurrentNodeIds([nextNodeId]);
+      if (targetFailed.includes(nextNodeId)) {
+        setDisplayFailedNodeIds((prev) => mergeUniqueNodes(prev, [nextNodeId]));
+      }
+    }, GRAPH_GROOMING_REPLAY_STEP_MS);
+
+    return () => {
+      if (graphReplayTimerRef.current) {
+        window.clearInterval(graphReplayTimerRef.current);
+        graphReplayTimerRef.current = null;
+      }
+    };
+  }, [
+    activeView,
+    currentNodeIds,
+    displayCurrentNodeIds,
+    displayFailedNodeIds,
+    displayVisitedNodeIds,
+    failedNodeIds,
+    isGraphReplayRunning,
+    lastEventType,
+    processData?.status,
+    status,
+    visitedNodeIds,
+  ]);
+
+  useEffect(() => {
+    const completionSignals = [(lastEventType || "").toString().toLowerCase(), (processData?.status || "").toString().toLowerCase()];
+    const isCompleted = completionSignals.some(
+      (value) => value.includes("complete") || value.includes("completed") || value.includes("done") || value.includes("success")
+    );
+
+    const preferredFinalAnswerUrl = pickPreferredFinalAnswerUrl([processData?.final_answer_url, finalAnswerUrl, ...(processData?.result_urls || [])]);
+    const liveFinalAnswerUrl = resolveSourceUrl(preferredFinalAnswerUrl);
     if (!isCompleted || !liveFinalAnswerUrl) {
       return;
     }
 
-    setActiveView("document");
     setActiveDocumentUrl((prev) => {
       const normalizedPrev = resolveSourceUrl(prev);
       return normalizedPrev === liveFinalAnswerUrl ? prev : liveFinalAnswerUrl;
     });
-  }, [finalAnswerUrl, lastEventType, processData?.final_answer_url, processData?.status, status]);
 
-  useEffect(() => {
-    if (!processData) {
-      return;
+    if (!forceGraphView) {
+      setActiveView("document");
     }
-
-    try {
-      const parsed = processData.grooming_data;
-      if (!parsed || !parsed.currentNodeIds) {
-        if (!currentNodeIdsRef.current || currentNodeIdsRef.current.length === 0 || currentNodeIdsRef.current[0] !== "START") {
-          setCurrentNodeIds(["START"]);
-          setVisitedNodeIds(["START"]);
-          setFailedNodeIds([]);
-          currentNodeIdsRef.current = ["START"];
-        }
-        return;
-      }
-
-      const restoredCurrent = sanitizeNodeIdList(parsed?.currentNodeIds, ["START"]);
-      const restoredVisited = sanitizeNodeIdList(parsed?.visitedNodeIds, ["START"]);
-      const restoredFailed = sanitizeNodeIdList(parsed?.failedNodeIds, []);
-
-      setCurrentNodeIds(restoredCurrent);
-      setVisitedNodeIds(restoredVisited);
-      setFailedNodeIds(restoredFailed);
-      currentNodeIdsRef.current = restoredCurrent;
-    } catch {
-      setCurrentNodeIds(["START"]);
-      setVisitedNodeIds(["START"]);
-      setFailedNodeIds([]);
-      currentNodeIdsRef.current = ["START"];
-    }
-  }, [processData?.grooming_data]);
+  }, [finalAnswerUrl, forceGraphView, lastEventType, processData?.final_answer_url, processData?.result_urls, processData?.status]);
 
   useEffect(() => {
     if (!projectId) {
       return;
     }
 
-    // Only save if we have actual state beyond just START
-    if (
-      currentNodeIds.length === 1 &&
-      currentNodeIds[0] === "START" &&
-      visitedNodeIds.length === 1 &&
-      visitedNodeIds[0] === "START" &&
-      failedNodeIds.length === 0
-    ) {
+    try {
+      const parsed = processData?.grooming_data;
+      if (!parsed || typeof parsed !== "object") {
+        return;
+      }
+
+      const restoredCurrent = sanitizeNodeIdList(parsed?.currentNodeIds, ["START"]);
+      const restoredVisited = sanitizeNodeIdList(parsed?.visitedNodeIds, restoredCurrent);
+      const restoredFailed = sanitizeNodeIdList(parsed?.failedNodeIds, []);
+      const restoredNodeStatusById = sanitizeNodeStatusById(parsed?.nodeStatusById);
+      const restoredNodeSocketMessagesById = sanitizeNodeSocketMessagesById(parsed?.nodeSocketMessagesById);
+
+      setCurrentNodeIds(restoredCurrent);
+      setVisitedNodeIds(restoredVisited);
+      setFailedNodeIds(restoredFailed);
+      setNodeStatusById(restoredNodeStatusById);
+      setNodeSocketMessagesById(restoredNodeSocketMessagesById);
+      setSelectedNodeId((prev) => prev || restoredCurrent[0] || "");
+      currentNodeIdsRef.current = restoredCurrent;
+      replayCurrentNodeIdsRef.current = restoredCurrent;
+      replayVisitedNodeIdsRef.current = restoredVisited;
+      replayFailedNodeIdsRef.current = restoredFailed;
+      processedSocketLogIdsRef.current = new Set();
+      completedEventAppliedRef.current = false;
+      setGraphReplayRequestId((prev) => prev + 1);
+    } catch {
+      // Keep current in-memory state if grooming snapshot restore fails.
+    }
+  }, [processData?.grooming_data, projectId]);
+
+  useEffect(() => {
+    if (!projectId) {
       return;
     }
 
@@ -849,48 +2083,289 @@ export default function WorkspacePage() {
       currentNodeIds,
       visitedNodeIds,
       failedNodeIds,
+      nodeStatusById,
+      nodeSocketMessagesById,
       savedAt: Date.now(),
     };
 
-    saveGroomingData(projectId, snapshot).catch(() => {
-      // Ignore API save failures silently
-    });
-  }, [currentNodeIds, failedNodeIds, projectId, visitedNodeIds]);
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(getGraphStateStorageKey(projectId), JSON.stringify(snapshot));
+      } catch {
+        // Ignore local cache write failures silently.
+      }
+    }
+
+    const hasNodeSocketHistory = Object.values(nodeSocketMessagesById).some((entries) => Array.isArray(entries) && entries.length > 0);
+    const hasNodeStatus = Object.keys(nodeStatusById).length > 0;
+
+    // Only save if we have actual state beyond just START
+    if (
+      currentNodeIds.length === 1 &&
+      currentNodeIds[0] === "START" &&
+      visitedNodeIds.length === 1 &&
+      visitedNodeIds[0] === "START" &&
+      failedNodeIds.length === 0 &&
+      !hasNodeSocketHistory &&
+      !hasNodeStatus
+    ) {
+      return;
+    }
+
+    let isDisposed = false;
+    const requestId = groomingSyncRequestIdRef.current + 1;
+    groomingSyncRequestIdRef.current = requestId;
+
+    const syncGroomingSnapshot = async () => {
+      try {
+        await saveGroomingData(projectId, snapshot);
+
+        const fetched = await fetchGroomingData(projectId);
+        if (isDisposed || groomingSyncRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        const remoteSnapshot = fetched?.grooming_data;
+        if (!remoteSnapshot || typeof remoteSnapshot !== "object") {
+          return;
+        }
+
+        const remoteSavedAt = Number(remoteSnapshot.savedAt || 0);
+        if (Number.isFinite(remoteSavedAt) && remoteSavedAt > 0 && remoteSavedAt < snapshot.savedAt) {
+          return;
+        }
+
+        const remoteCurrentNodeIds = sanitizeNodeIdList(remoteSnapshot.currentNodeIds, ["START"]);
+        const remoteVisitedNodeIds = sanitizeNodeIdList(remoteSnapshot.visitedNodeIds, remoteCurrentNodeIds);
+        const remoteFailedNodeIds = sanitizeNodeIdList(remoteSnapshot.failedNodeIds, []);
+        const remoteNodeStatusById = sanitizeNodeStatusById(remoteSnapshot.nodeStatusById);
+        const remoteNodeSocketMessagesById = sanitizeNodeSocketMessagesById(remoteSnapshot.nodeSocketMessagesById);
+
+        if (!areStringArraysEqual(currentNodeIds, remoteCurrentNodeIds)) {
+          setCurrentNodeIds(remoteCurrentNodeIds);
+        }
+
+        if (!areStringArraysEqual(visitedNodeIds, remoteVisitedNodeIds)) {
+          setVisitedNodeIds(remoteVisitedNodeIds);
+        }
+
+        if (!areStringArraysEqual(failedNodeIds, remoteFailedNodeIds)) {
+          setFailedNodeIds(remoteFailedNodeIds);
+        }
+
+        if (!areNodeStatusMapsEqual(nodeStatusById, remoteNodeStatusById)) {
+          setNodeStatusById(remoteNodeStatusById);
+        }
+
+        if (!areNodeSocketMessageMapsEqual(nodeSocketMessagesById, remoteNodeSocketMessagesById)) {
+          setNodeSocketMessagesById(remoteNodeSocketMessagesById);
+        }
+
+        const preferredSelection =
+          remoteCurrentNodeIds[0] || remoteVisitedNodeIds[remoteVisitedNodeIds.length - 1] || "";
+        if (preferredSelection) {
+          setSelectedNodeId((prev) => prev || preferredSelection);
+        }
+      } catch {
+        // Ignore grooming sync failures silently.
+      }
+    };
+
+    syncGroomingSnapshot();
+
+    return () => {
+      isDisposed = true;
+    };
+  }, [currentNodeIds, failedNodeIds, nodeSocketMessagesById, nodeStatusById, projectId, visitedNodeIds]);
 
   useEffect(() => {
     currentNodeIdsRef.current = currentNodeIds;
   }, [currentNodeIds]);
 
   useEffect(() => {
+    replayCurrentNodeIdsRef.current = currentNodeIds;
+    replayVisitedNodeIdsRef.current = visitedNodeIds;
+    replayFailedNodeIdsRef.current = failedNodeIds;
+  }, [currentNodeIds, failedNodeIds, visitedNodeIds]);
+
+  useEffect(() => {
     if (logs.length === 0 && lastEventType !== "completed") {
       return;
+    }
+
+    const nextVisitedNodeIds = [];
+    const nextFailedNodeIds = [];
+    const nextStatusById = {};
+    const nextSocketMessagesById = {};
+    let latestMappedNodeIds = null;
+
+    for (const logEntry of logs) {
+      const nextType = (logEntry?.type || "message").toString().toLowerCase();
+      const nextEventType = (logEntry?.eventType || nextType).toString().trim().toLowerCase();
+      const nextSocketStatus = (logEntry?.status || "").toString().trim().toLowerCase();
+      const nextCurrentNode = (logEntry?.currentNode || logEntry?.current_node || "").toString().trim().toLowerCase();
+      const nextMessage = (logEntry?.message || "").toString().trim();
+      const nextAt = typeof logEntry?.at === "string" ? logEntry.at : "";
+      const rawLogId =
+        typeof logEntry?.id === "string" && logEntry.id.trim()
+          ? logEntry.id.trim()
+          : `${nextType}-${nextEventType}-${nextCurrentNode}-${nextAt}-${nextMessage}`;
+
+      if (processedSocketLogIdsRef.current.has(rawLogId)) {
+        continue;
+      }
+      processedSocketLogIdsRef.current.add(rawLogId);
+
+      const mappedByNode = mapSocketNodeToGraphNodes(nextCurrentNode, nextMessage, nextEventType);
+      const mappedByMessage = mapLogToActiveNodes(nextMessage, nextEventType || nextType);
+      const mappedNodeIds = mappedByNode && mappedByNode.length > 0 ? mappedByNode : mappedByMessage;
+      const normalizedMessage = nextMessage.toLowerCase();
+      const isFailureEvent =
+        nextType.includes("error") ||
+        nextType.includes("failed") ||
+        nextEventType.includes("error") ||
+        nextEventType.includes("failed") ||
+        nextSocketStatus.includes("error") ||
+        nextSocketStatus.includes("failed");
+      const isTransportError = normalizedMessage.includes("websocket") || normalizedMessage.includes("socket");
+      const isCompletionLike =
+        nextType.includes("completed") ||
+        nextType.includes("success") ||
+        nextEventType.includes("completed") ||
+        nextEventType.includes("success") ||
+        nextSocketStatus.includes("completed") ||
+        nextSocketStatus.includes("success") ||
+        nextSocketStatus.includes("done");
+      const mappedNodeStatus = mapSocketStatusToNodeStatus(nextSocketStatus, nextEventType, nextType);
+
+      let targetNodeIds = [];
+      let visitedProgressNodeIds = [];
+      if (mappedNodeIds && mappedNodeIds.length > 0) {
+        latestMappedNodeIds = mappedNodeIds;
+        targetNodeIds = mappedNodeIds;
+
+        const hasOnlyStartVisited = replayVisitedNodeIdsRef.current.length === 1 && replayVisitedNodeIdsRef.current[0] === "START";
+        const shouldBootstrapProgress = hasOnlyStartVisited && nextVisitedNodeIds.length === 0;
+        visitedProgressNodeIds = shouldBootstrapProgress ? buildBootstrapProgressNodes(mappedNodeIds) : mappedNodeIds;
+      } else if (isFailureEvent && !isTransportError && currentNodeIdsRef.current.length > 0) {
+        targetNodeIds = currentNodeIdsRef.current;
+        visitedProgressNodeIds = currentNodeIdsRef.current;
+      }
+
+      if (targetNodeIds.length === 0) {
+        continue;
+      }
+
+      nextVisitedNodeIds.push(...visitedProgressNodeIds);
+
+      for (const nodeId of targetNodeIds) {
+        let inferredStatus = mappedNodeStatus;
+        if (inferredStatus === "idle") {
+          inferredStatus = isFailureEvent && !isTransportError ? "failed" : isCompletionLike ? "success" : "processing";
+        } else if (isTransportError && inferredStatus === "failed") {
+          inferredStatus = "processing";
+        }
+
+        nextStatusById[nodeId] = chooseNodeStatus(nextStatusById[nodeId], inferredStatus);
+
+        if (!nextMessage) {
+          continue;
+        }
+
+        if (!nextSocketMessagesById[nodeId]) {
+          nextSocketMessagesById[nodeId] = [];
+        }
+
+        nextSocketMessagesById[nodeId].push({
+          id: `${rawLogId}-${nodeId}`,
+          type: nextType || "message",
+          eventType: nextEventType || nextType || "message",
+          currentNode: nextCurrentNode || "",
+          status: nextSocketStatus || "",
+          message: nextMessage,
+          at: nextAt,
+        });
+      }
+
+      if (isFailureEvent && !isTransportError) {
+        nextFailedNodeIds.push(...targetNodeIds);
+      }
+    }
+
+    if (latestMappedNodeIds && latestMappedNodeIds.length > 0) {
+      const previousCurrentNodeIds = currentNodeIdsRef.current;
+      setCurrentNodeIds((prev) => (areStringArraysEqual(prev, latestMappedNodeIds) ? prev : latestMappedNodeIds));
+      setSelectedNodeId((prev) => prev || latestMappedNodeIds[0] || "");
+      setNodeStatusById((prev) => {
+        const merged = { ...prev };
+        for (const nodeId of previousCurrentNodeIds) {
+          if (latestMappedNodeIds.includes(nodeId)) {
+            continue;
+          }
+
+          if (normalizeNodeStatus(merged[nodeId]) === "failed") {
+            continue;
+          }
+
+          merged[nodeId] = chooseNodeStatus(merged[nodeId], "success");
+        }
+        return merged;
+      });
+    }
+
+    if (nextVisitedNodeIds.length > 0) {
+      setVisitedNodeIds((prev) => mergeUniqueNodes(prev, nextVisitedNodeIds));
+    }
+
+    if (nextFailedNodeIds.length > 0) {
+      setFailedNodeIds((prev) => mergeUniqueNodes(prev, nextFailedNodeIds));
+    }
+
+    if (Object.keys(nextStatusById).length > 0) {
+      setNodeStatusById((prev) => {
+        const merged = { ...prev };
+        for (const [nodeId, nextStatus] of Object.entries(nextStatusById)) {
+          merged[nodeId] = chooseNodeStatus(merged[nodeId], nextStatus);
+        }
+        return merged;
+      });
+    }
+
+    if (Object.keys(nextSocketMessagesById).length > 0) {
+      setNodeSocketMessagesById((prev) => mergeNodeSocketMessages(prev, nextSocketMessagesById));
     }
 
     if (lastEventType === "completed") {
       setCurrentNodeIds((prev) => (areStringArraysEqual(prev, ["END"]) ? prev : ["END"]));
       setVisitedNodeIds((prev) => mergeUniqueNodes(prev, ["END"]));
-      return;
-    }
+      setNodeStatusById((prev) => ({
+        ...prev,
+        END: chooseNodeStatus(prev.END, "success"),
+      }));
 
-    const latestLog = logs[logs.length - 1];
-    const mappedNodeIds = mapLogToActiveNodes(latestLog?.message || "", latestLog?.type || lastEventType);
-    const normalizedEventType = (latestLog?.type || lastEventType || status || "").toString().toLowerCase();
-    const isFailureEvent = normalizedEventType.includes("failed") || normalizedEventType.includes("error");
-
-    if (mappedNodeIds && mappedNodeIds.length > 0) {
-      setCurrentNodeIds((prev) => (areStringArraysEqual(prev, mappedNodeIds) ? prev : mappedNodeIds));
-      setVisitedNodeIds((prev) => mergeUniqueNodes(prev, mappedNodeIds));
-
-      if (isFailureEvent) {
-        setFailedNodeIds((prev) => mergeUniqueNodes(prev, mappedNodeIds));
+      if (!completedEventAppliedRef.current) {
+        completedEventAppliedRef.current = true;
+        setNodeSocketMessagesById((prev) =>
+          mergeNodeSocketMessages(prev, {
+            END: [
+              {
+                id: `completed-${projectId}`,
+                type: "completed",
+                eventType: "completed",
+                currentNode: "end",
+                status: "completed",
+                message: "Pipeline completed successfully.",
+                at: new Date().toLocaleTimeString(),
+              },
+            ],
+          })
+        );
       }
       return;
     }
 
-    if (isFailureEvent && currentNodeIdsRef.current.length > 0) {
-      setFailedNodeIds((prev) => mergeUniqueNodes(prev, currentNodeIdsRef.current));
-    }
-  }, [lastEventType, logs, status]);
+    completedEventAppliedRef.current = false;
+  }, [lastEventType, logs, projectId, status]);
 
   const sourceDocumentUrl = resolveSourceUrl(activeDocumentUrl);
   const previewDocumentUrl = buildPreviewUrl(activeDocumentUrl);
@@ -957,7 +2432,6 @@ export default function WorkspacePage() {
     };
   }, [previewDocumentUrl, sourceDocumentUrl]);
 
-  const memoNodeTypes = useMemo(() => nodeTypes, []);
   const parsedMarkdown = useMemo(() => splitMarkdownReferencesBlock(markdownContent), [markdownContent]);
   const tokenizedMarkdown = useMemo(() => tokenizeMarkdownDataImages(parsedMarkdown.body), [parsedMarkdown.body]);
 
@@ -1073,31 +2547,110 @@ export default function WorkspacePage() {
   const currentSet = useMemo(() => new Set(currentNodeIds), [currentNodeIds]);
   const visitedSet = useMemo(() => new Set(visitedNodeIds), [visitedNodeIds]);
   const failedSet = useMemo(() => new Set(failedNodeIds), [failedNodeIds]);
+  const displayCurrentSet = useMemo(() => new Set(displayCurrentNodeIds), [displayCurrentNodeIds]);
+  const displayVisitedSet = useMemo(() => new Set(displayVisitedNodeIds), [displayVisitedNodeIds]);
+  const displayFailedSet = useMemo(() => new Set(displayFailedNodeIds), [displayFailedNodeIds]);
+  const nodeActivityById = useMemo(() => {
+    const activity = {};
+
+    for (const [nodeId, entries] of Object.entries(nodeSocketMessagesById || {})) {
+      if (!Array.isArray(entries) || entries.length === 0) {
+        continue;
+      }
+
+      const latestEntry = entries[entries.length - 1];
+      activity[nodeId] = {
+        message: truncateActivityText(latestEntry?.message || ""),
+        type: (latestEntry?.type || "").toLowerCase(),
+        at: latestEntry?.at || "",
+      };
+    }
+
+    if (lastEventType === "completed") {
+      activity.END = activity.END || {
+        message: "Pipeline completed successfully.",
+        type: "completed",
+        at: new Date().toLocaleTimeString(),
+      };
+    }
+
+    return activity;
+  }, [lastEventType, nodeSocketMessagesById]);
 
   const flowNodes = useMemo(
     () =>
-      PIPELINE_NODES.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          nodeState: failedSet.has(node.id) && currentSet.has(node.id) ? "failed" : visitedSet.has(node.id) || currentSet.has(node.id) ? "active" : "idle",
-        },
-      })),
-    [currentSet, failedSet, visitedSet]
+      PIPELINE_NODES.map((node) => {
+        const stepIndex = PRIMARY_STAGE_SEQUENCE.indexOf(node.id);
+        const nodeActivity = nodeActivityById[node.id] || null;
+        const fallbackLiveText = currentSet.has(node.id) ? `Working: ${node.data.subtitle}` : "";
+        const trackedStatus = normalizeNodeStatus(nodeStatusById[node.id]);
+        const nodeState =
+          displayFailedSet.has(node.id) || (trackedStatus === "failed" && !isGraphReplayRunning)
+            ? "failed"
+            : displayCurrentSet.has(node.id) || (trackedStatus === "processing" && !isGraphReplayRunning)
+            ? "active"
+            : displayVisitedSet.has(node.id) || (trackedStatus === "success" && !isGraphReplayRunning)
+            ? "visited"
+            : "idle";
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            nodeId: node.id,
+            stepIndex,
+            isPrimaryStage: PRIMARY_STAGE_SET.has(node.id),
+            isSelected: selectedNodeId === node.id,
+            activityMessage: nodeActivity?.message || fallbackLiveText,
+            nodeState,
+          },
+        };
+      }),
+    [currentSet, displayCurrentSet, displayFailedSet, displayVisitedSet, isGraphReplayRunning, nodeActivityById, nodeStatusById, selectedNodeId]
+  );
+
+  const flowEdges = useMemo(
+    () =>
+      PIPELINE_EDGES.map((edge) => {
+        const sourceActive = displayCurrentSet.has(edge.source);
+        const targetActive = displayCurrentSet.has(edge.target);
+        const sourceVisited = displayVisitedSet.has(edge.source);
+        const targetVisited = displayVisitedSet.has(edge.target);
+        const failedEdge = displayFailedSet.has(edge.source) || displayFailedSet.has(edge.target);
+
+        const edgeState = failedEdge
+          ? "failed"
+          : sourceActive || targetActive
+          ? "active"
+          : sourceVisited && targetVisited
+          ? "visited"
+          : "idle";
+
+        return {
+          ...edge,
+          data: {
+            ...(edge.data || {}),
+            edgeState,
+          },
+        };
+      }),
+    [displayCurrentSet, displayFailedSet, displayVisitedSet]
   );
 
   const processStatus = (processData?.status || "").toString().trim().toLowerCase();
   const socketStatus = (status || "").toString().trim().toLowerCase();
   const eventStatus = (lastEventType || "").toString().trim().toLowerCase();
   const referenceUrls = Array.isArray(processData?.reference_urls) ? processData.reference_urls : [];
-  const questionUrls = Array.isArray(processData?.question_urls) ? processData.question_urls : [];
-  const resultUrls = Array.isArray(processData?.result_urls) ? processData.result_urls : [];
-  const resolvedFinalAnswerUrl = finalAnswerUrl || processData?.final_answer_url || "";
+  const questionUrls = filterDisplayableDocumentUrls(Array.isArray(processData?.question_urls) ? processData.question_urls : []);
+  const resultUrls = filterDisplayableDocumentUrls(Array.isArray(processData?.result_urls) ? processData.result_urls : []).filter((url) =>
+    isLikelyFinalAnswerUrl(url)
+  );
+  const resolvedFinalAnswerUrl = pickPreferredFinalAnswerUrl([processData?.final_answer_url, finalAnswerUrl, ...resultUrls]);
   const isFailedState =
     [socketStatus, processStatus, eventStatus].some((value) => value.includes("failed") || value.includes("error"));
   const isCompletedState =
     Boolean(resolvedFinalAnswerUrl) ||
-    [socketStatus, processStatus, eventStatus].some(
+    [processStatus, eventStatus].some(
       (value) => value.includes("complete") || value.includes("completed") || value.includes("done") || value.includes("success")
     );
   const headerStatus = isFailedState ? "failed" : isCompletedState ? "completed" : projectId ? "processing" : "idle";
@@ -1106,8 +2659,105 @@ export default function WorkspacePage() {
       [resolvedFinalAnswerUrl, ...resultUrls].filter((item) => typeof item === "string" && item.trim())
     )
   );
+  const sidebarActiveFile = activeView === "document" ? activeDocumentUrl : "";
   const agentStatusLabel = toTitleCase(headerStatus);
   const documentIsMarkdown = isMarkdownUrl(sourceDocumentUrl);
+  const isProcessRunning = headerStatus === "processing";
+  const isAnimationPanelSync = activeView === "graph" && (isProcessRunning || isGraphReplayRunning);
+
+  const animatedReachedNodeIds = useMemo(
+    () => new Set([...displayVisitedNodeIds, ...displayCurrentNodeIds, ...displayFailedNodeIds]),
+    [displayCurrentNodeIds, displayFailedNodeIds, displayVisitedNodeIds]
+  );
+
+  const clickSelectableNodeIds = useMemo(() => {
+    const nodeIds = new Set([...visitedNodeIds, ...currentNodeIds, ...failedNodeIds]);
+
+    for (const [nodeId, entries] of Object.entries(nodeSocketMessagesById || {})) {
+      if (Array.isArray(entries) && entries.length > 0) {
+        nodeIds.add(nodeId);
+      }
+    }
+
+    for (const [nodeId, nodeStatus] of Object.entries(nodeStatusById || {})) {
+      if (normalizeNodeStatus(nodeStatus) !== "idle") {
+        nodeIds.add(nodeId);
+      }
+    }
+
+    return nodeIds;
+  }, [currentNodeIds, failedNodeIds, nodeSocketMessagesById, nodeStatusById, visitedNodeIds]);
+
+  const panelVisibleNodeIds = useMemo(
+    () => (isAnimationPanelSync ? animatedReachedNodeIds : clickSelectableNodeIds),
+    [animatedReachedNodeIds, clickSelectableNodeIds, isAnimationPanelSync]
+  );
+
+  useEffect(() => {
+    if (activeView !== "graph") {
+      return;
+    }
+
+    if (isAnimationPanelSync) {
+      const nextFocusedNodeId = displayCurrentNodeIds[displayCurrentNodeIds.length - 1] || "";
+      if (!nextFocusedNodeId) {
+        return;
+      }
+
+      setSelectedNodeId((prev) => (prev === nextFocusedNodeId ? prev : nextFocusedNodeId));
+      return;
+    }
+
+    setSelectedNodeId((prev) => {
+      if (prev && panelVisibleNodeIds.has(prev)) {
+        return prev;
+      }
+      return "";
+    });
+  }, [activeView, displayCurrentNodeIds, isAnimationPanelSync, panelVisibleNodeIds]);
+
+  const selectedNodeDetails = useMemo(() => {
+    if (!selectedNodeId || !panelVisibleNodeIds.has(selectedNodeId)) {
+      return null;
+    }
+    return PIPELINE_NODES.find((node) => node.id === selectedNodeId) || null;
+  }, [panelVisibleNodeIds, selectedNodeId]);
+
+  const selectedDetailsNodeId = selectedNodeDetails?.id || "";
+
+  const selectedNodeSocketMessages = useMemo(() => {
+    if (!selectedDetailsNodeId) {
+      return [];
+    }
+
+    if (isAnimationPanelSync && !animatedReachedNodeIds.has(selectedDetailsNodeId)) {
+      return [];
+    }
+
+    const entries = Array.isArray(nodeSocketMessagesById[selectedDetailsNodeId]) ? nodeSocketMessagesById[selectedDetailsNodeId] : [];
+    return [...entries].reverse();
+  }, [animatedReachedNodeIds, isAnimationPanelSync, nodeSocketMessagesById, selectedDetailsNodeId]);
+
+  const selectedNodeStatus = useMemo(() => {
+    if (!selectedDetailsNodeId) {
+      return "idle";
+    }
+
+    const failedPool = isAnimationPanelSync ? displayFailedSet : failedSet;
+    const currentPool = isAnimationPanelSync ? displayCurrentSet : currentSet;
+    const visitedPool = isAnimationPanelSync ? displayVisitedSet : visitedSet;
+
+    if (failedPool.has(selectedDetailsNodeId) || nodeStatusById[selectedDetailsNodeId] === "failed") {
+      return "failed";
+    }
+    if (currentPool.has(selectedDetailsNodeId) || nodeStatusById[selectedDetailsNodeId] === "processing") {
+      return "processing";
+    }
+    if (visitedPool.has(selectedDetailsNodeId) || nodeStatusById[selectedDetailsNodeId] === "success") {
+      return "success";
+    }
+    return "idle";
+  }, [currentSet, displayCurrentSet, displayFailedSet, displayVisitedSet, failedSet, isAnimationPanelSync, nodeStatusById, selectedDetailsNodeId, visitedSet]);
 
   const processedMarkdown = useMemo(() => {
     let text = tokenizedMarkdown.content || "";
@@ -1158,7 +2808,7 @@ export default function WorkspacePage() {
               referenceUrls={referenceUrls}
               questionUrls={questionUrls}
               resultUrls={sidebarResultUrls}
-              activeFile={activeDocumentUrl}
+              activeFile={sidebarActiveFile}
               onFileSelect={(url) => {
                 setActiveDocumentUrl(url);
                 setActiveView("document");
@@ -1178,7 +2828,13 @@ export default function WorkspacePage() {
                     <div className="rounded-xl border border-white/10 bg-black/40 p-1">
                       <button
                         type="button"
-                        onClick={() => setActiveView("graph")}
+                        onClick={() => {
+                          if (activeView === "graph") {
+                            setGraphReplayRequestId((prev) => prev + 1);
+                            return;
+                          }
+                          setActiveView("graph");
+                        }}
                         className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all ${
                           activeView === "graph"
                             ? "bg-violet-500/20 text-violet-100"
@@ -1221,22 +2877,114 @@ export default function WorkspacePage() {
                 ) : loadError ? (
                   <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-white/10 bg-black/30 text-sm text-red-300">{loadError}</div>
                 ) : activeView === "graph" ? (
-                  <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-white/10 bg-black/30">
-                    <ReactFlow
-                      nodes={flowNodes}
-                      edges={PIPELINE_EDGES}
-                      fitView
-                      fitViewOptions={{ padding: 0.2 }}
-                      nodesDraggable={false}
-                      nodesConnectable={false}
-                      elementsSelectable={false}
-                      panOnDrag
-                      zoomOnScroll
-                      nodeTypes={memoNodeTypes}
-                    >
-                      <Background color="rgba(148,163,184,0.15)" gap={24} />
-                      <Controls />
-                    </ReactFlow>
+                  <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-white/10 bg-black/30 p-3">
+                    <div className={`grid h-full min-h-0 gap-3 ${selectedNodeDetails ? "xl:grid-cols-[minmax(0,1fr)_360px]" : ""}`}>
+                      <div className="relative h-full min-h-[360px] overflow-hidden rounded-xl border border-white/10 bg-[#0b0f18]">
+                        <div className="pointer-events-none absolute left-3 top-3 z-20 rounded-md border border-violet-400/30 bg-violet-500/10 px-2 py-1 text-[10px] uppercase tracking-wider text-violet-100/90">
+                          Follow main flow: step badges 01 → 12
+                        </div>
+                        <div className="pointer-events-none absolute right-3 top-3 z-20 rounded-md border border-violet-400/30 bg-violet-500/10 px-2 py-1 text-[10px] uppercase tracking-wider text-violet-100/90">
+                          {isAnimationPanelSync ? "Auto-following grooming + node socket details" : "Click node to inspect socket history"}
+                        </div>
+
+                        <ReactFlow
+                          nodes={flowNodes}
+                          edges={flowEdges}
+                          fitView
+                          fitViewOptions={{ padding: 0.06, minZoom: 0.44, maxZoom: 1.9 }}
+                          nodesDraggable={false}
+                          nodesConnectable={false}
+                          elementsSelectable={false}
+                          panOnDrag
+                          zoomOnScroll
+                          minZoom={0.38}
+                          maxZoom={1.9}
+                          nodeTypes={nodeTypes}
+                          edgeTypes={edgeTypes}
+                          onNodeClick={(_event, node) => {
+                            if (isAnimationPanelSync || !panelVisibleNodeIds.has(node.id)) {
+                              return;
+                            }
+                            setSelectedNodeId(node.id);
+                          }}
+                          onPaneClick={() => {
+                            if (isAnimationPanelSync) {
+                              return;
+                            }
+                            setSelectedNodeId("");
+                          }}
+                        >
+                          <Background color="rgba(167,139,250,0.2)" gap={22} />
+                          <Controls />
+                        </ReactFlow>
+                      </div>
+
+                      {selectedNodeDetails && (
+                        <aside className="flex min-h-0 flex-col rounded-xl border border-violet-300/25 bg-gradient-to-b from-violet-500/10 via-[#0c111a] to-[#090c12] p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-violet-200/80">Node Details</p>
+                              <p className="mt-1 text-sm font-semibold text-white">{selectedNodeDetails.data.label}</p>
+                              <p className="mt-0.5 text-[11px] uppercase tracking-wider text-slate-300/75">{selectedNodeDetails.id}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!isAnimationPanelSync) {
+                                  setSelectedNodeId("");
+                                }
+                              }}
+                              disabled={isAnimationPanelSync}
+                              className="rounded-md border border-white/15 px-2 py-1 text-[11px] font-semibold text-slate-200 transition hover:border-violet-300/45 hover:text-violet-100 disabled:cursor-not-allowed disabled:opacity-45"
+                            >
+                              Close
+                            </button>
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                            <div className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-slate-300">
+                              <p className="uppercase tracking-wider text-slate-400">Status</p>
+                              <p className={`mt-0.5 font-semibold ${selectedNodeStatus === "failed" ? "text-red-200" : "text-violet-200"}`}>
+                                {toTitleCase(selectedNodeStatus)}
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-slate-300">
+                              <p className="uppercase tracking-wider text-slate-400">Messages</p>
+                              <p className="mt-0.5 font-semibold text-violet-200">{selectedNodeSocketMessages.length}</p>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1 custom-scrollbar">
+                            {selectedNodeSocketMessages.length > 0 ? (
+                              <div className="space-y-2">
+                                {selectedNodeSocketMessages.map((entry) => {
+                                  const nextType = (entry?.type || "message").toLowerCase();
+                                  const toneClass = nextType.includes("error")
+                                    ? "border-red-400/35 bg-red-500/10 text-red-100"
+                                    : nextType.includes("completed")
+                                    ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-100"
+                                    : "border-violet-300/25 bg-violet-500/10 text-violet-100";
+
+                                  return (
+                                    <article key={entry.id} className={`rounded-lg border px-3 py-2 text-xs ${toneClass}`}>
+                                      <div className="mb-1 flex items-center justify-between gap-2">
+                                        <span className="font-semibold uppercase tracking-wide">{toTitleCase(entry.type || "message")}</span>
+                                        <span className="text-[10px] text-slate-300/80">{entry.at || ""}</span>
+                                      </div>
+                                      <p className="leading-relaxed">{entry.message}</p>
+                                    </article>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="flex h-full min-h-[120px] items-center justify-center rounded-lg border border-dashed border-white/10 text-center text-xs text-slate-400">
+                                No socket logs mapped to this node yet.
+                              </div>
+                            )}
+                          </div>
+                        </aside>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="min-h-0 flex-1 overflow-visible rounded-xl border border-white/10 bg-black/20">
@@ -1315,6 +3063,151 @@ export default function WorkspacePage() {
           animation: pulseGlowRed 1.8s ease-in-out infinite;
         }
 
+        .node-visited-glow {
+          box-shadow: 0 0 12px rgba(167, 139, 250, 0.22);
+        }
+
+        .node-avatar {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          height: 3.1rem;
+          width: 3.1rem;
+          border-radius: 9999px;
+          border: 1px solid rgba(203, 213, 225, 0.35);
+          background: radial-gradient(circle at 30% 30%, rgba(148, 163, 184, 0.28), rgba(30, 41, 59, 0.5));
+          color: #e2e8f0;
+          overflow: hidden;
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+        }
+
+        .node-avatar-idle {
+          border-color: rgba(203, 213, 225, 0.35);
+        }
+
+        .node-avatar-active {
+          border-color: rgba(167, 139, 250, 0.72);
+          background: radial-gradient(circle at 30% 30%, rgba(192, 132, 252, 0.55), rgba(76, 29, 149, 0.28));
+          color: #ede9fe;
+          box-shadow: 0 0 18px rgba(139, 92, 246, 0.3);
+          animation: avatarPulse 1.4s ease-in-out infinite;
+        }
+
+        .node-avatar-visited {
+          border-color: rgba(196, 181, 253, 0.62);
+          background: radial-gradient(circle at 30% 30%, rgba(167, 139, 250, 0.42), rgba(67, 56, 202, 0.2));
+          color: #ddd6fe;
+          box-shadow: 0 0 12px rgba(139, 92, 246, 0.2);
+        }
+
+        .node-avatar-failed {
+          border-color: rgba(248, 113, 113, 0.72);
+          background: radial-gradient(circle at 30% 30%, rgba(248, 113, 113, 0.55), rgba(127, 29, 29, 0.28));
+          color: #fee2e2;
+          box-shadow: 0 0 18px rgba(248, 113, 113, 0.28);
+          animation: avatarError 0.75s ease-in-out infinite;
+        }
+
+        .node-avatar-ring {
+          position: absolute;
+          inset: 2px;
+          border-radius: 9999px;
+          border: 1px solid rgba(241, 245, 249, 0.25);
+        }
+
+        .node-avatar-icon {
+          position: relative;
+          z-index: 1;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          height: 2.35rem;
+          width: 2.35rem;
+          animation: floatAgent 2.1s ease-in-out infinite;
+        }
+
+        .node-avatar-icon :global(.node-visual-svg) {
+          display: block;
+          height: 100% !important;
+          width: 100% !important;
+        }
+
+        .node-ai-chip {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 2.05rem;
+          height: 1.25rem;
+          padding: 0 0.5rem;
+          border-radius: 9999px;
+          border: 1px solid rgba(196, 181, 253, 0.55);
+          background: rgba(91, 33, 182, 0.35);
+          color: #e9d5ff;
+          font-size: 0.68rem;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+        }
+
+        .node-step-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 2.35rem;
+          height: 1.55rem;
+          padding: 0 0.55rem;
+          border-radius: 9999px;
+          border: 1px solid rgba(196, 181, 253, 0.45);
+          background: rgba(76, 29, 149, 0.45);
+          color: #ede9fe;
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+        }
+
+        .edge-packet {
+          fill: rgba(139, 92, 246, 0.9);
+          filter: drop-shadow(0 0 6px rgba(139, 92, 246, 0.85));
+        }
+
+        .edge-packet-secondary {
+          fill: rgba(216, 180, 254, 0.75);
+          filter: drop-shadow(0 0 7px rgba(216, 180, 254, 0.9));
+        }
+
+        .edge-packet-visited {
+          fill: rgba(196, 181, 253, 0.95);
+          filter: drop-shadow(0 0 5px rgba(167, 139, 250, 0.65));
+        }
+
+        .edge-packet-failed {
+          fill: rgba(248, 113, 113, 0.9);
+          filter: drop-shadow(0 0 8px rgba(248, 113, 113, 0.8));
+        }
+
+        .node-processing-bars {
+          display: inline-flex;
+          gap: 3px;
+          margin-top: 0.45rem;
+          margin-left: 2px;
+        }
+
+        .node-processing-bars span {
+          width: 4px;
+          height: 8px;
+          border-radius: 9999px;
+          background: linear-gradient(180deg, rgba(233, 213, 255, 1), rgba(167, 139, 250, 1));
+          animation: barBeat 1.1s ease-in-out infinite;
+        }
+
+        .node-processing-bars span:nth-child(2) {
+          animation-delay: 0.18s;
+        }
+
+        .node-processing-bars span:nth-child(3) {
+          animation-delay: 0.36s;
+        }
+
         @keyframes pulseGlow {
           0%,
           100% {
@@ -1332,6 +3225,53 @@ export default function WorkspacePage() {
           }
           50% {
             box-shadow: 0 0 24px rgba(248, 113, 113, 0.75), 0 0 48px rgba(248, 113, 113, 0.35);
+          }
+        }
+
+        @keyframes floatAgent {
+          0%,
+          100% {
+            transform: translateY(0);
+          }
+          50% {
+            transform: translateY(-2px);
+          }
+        }
+
+        @keyframes barBeat {
+          0%,
+          100% {
+            transform: scaleY(0.65);
+            opacity: 0.75;
+          }
+          50% {
+            transform: scaleY(1.25);
+            opacity: 1;
+          }
+        }
+
+        @keyframes avatarPulse {
+          0%,
+          100% {
+            transform: scale(1);
+            opacity: 0.85;
+          }
+          50% {
+            transform: scale(1.08);
+            opacity: 1;
+          }
+        }
+
+        @keyframes avatarError {
+          0%,
+          100% {
+            transform: translateX(0);
+          }
+          25% {
+            transform: translateX(-1px);
+          }
+          75% {
+            transform: translateX(1px);
           }
         }
 

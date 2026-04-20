@@ -5,18 +5,29 @@ import { fetchWsToken } from "@/lib/api/docuApi";
 import { connectProcessSocket } from "@/lib/realtime/processSocketClient";
 
 const NODE_ID_ALIASES = {
-  input: "input",
-  query: "input",
+  input: "start",
+  query: "start",
+  start: "start",
   orchestrator: "orchestrator",
   orchestrator_agent: "orchestrator",
-  academic: "academic",
-  academic_agent: "academic",
   extractor: "extractor",
   extractor_agent: "extractor",
-  synthesize: "synthesize",
-  synthesize_output: "synthesize",
-  final: "final",
-  final_result: "final",
+  academic: "academic",
+  academic_agent: "academic",
+  financial: "financial",
+  financial_agent: "financial",
+  audit: "audit",
+  audit_agent: "audit",
+  vector_rag_ingest: "vector_rag_ingest",
+  vector_ingestor: "vector_rag_ingest",
+  graph_rag_ingest: "graph_rag_ingest",
+  graph_ingestor: "graph_rag_ingest",
+  vectorless_ingest: "vectorless_ingest",
+  vectorless_ingestor: "vectorless_ingest",
+  final: "end",
+  final_result: "end",
+  end: "end",
+  completed: "end",
 };
 
 function normalizeNodeId(rawNode) {
@@ -25,7 +36,7 @@ function normalizeNodeId(rawNode) {
   }
 
   const normalized = rawNode.trim().toLowerCase();
-  return NODE_ID_ALIASES[normalized] ?? "";
+  return NODE_ID_ALIASES[normalized] ?? normalized;
 }
 
 function looksLikeUrl(value) {
@@ -122,6 +133,61 @@ function findCandidateUrlDeep(root) {
   return "";
 }
 
+function getCandidateFileName(url) {
+  if (typeof url !== "string" || !url.trim()) {
+    return "";
+  }
+
+  const normalized = url.trim();
+  try {
+    const parsed = new URL(normalized, /^https?:\/\//i.test(normalized) ? undefined : "http://local.preview");
+    const nested = parsed.searchParams.get("url");
+    const isBlobProxy = parsed.pathname.endsWith("/api/uploads/blob") || parsed.pathname.endsWith("/blob");
+    if (isBlobProxy && nested) {
+      return getCandidateFileName(nested);
+    }
+
+    return decodeURIComponent(parsed.pathname.split("/").pop() || "").toLowerCase();
+  } catch {
+    const withoutQuery = normalized.split(/[?#]/, 1)[0] || "";
+    try {
+      return decodeURIComponent(withoutQuery.split("/").pop() || "").toLowerCase();
+    } catch {
+      return (withoutQuery.split("/").pop() || "").toLowerCase();
+    }
+  }
+}
+
+function isHiddenIntermediateResultUrl(url) {
+  const fileName = getCandidateFileName(url);
+  if (!fileName) {
+    return false;
+  }
+
+  return (
+    fileName.includes("refined_question") ||
+    fileName.includes("refined-questions") ||
+    fileName.includes("refined questions")
+  );
+}
+
+function isLikelyFinalAnswerUrl(url) {
+  const fileName = getCandidateFileName(url);
+  if (!fileName) {
+    return false;
+  }
+
+  if (isHiddenIntermediateResultUrl(url)) {
+    return false;
+  }
+
+  return (
+    fileName.includes("final") ||
+    fileName.includes("answer") ||
+    fileName.includes("output")
+  );
+}
+
 export function useAgentWebSocket(projectId, enabled = true) {
   const isEnabled = typeof enabled === "object" ? Boolean(enabled?.enabled) : Boolean(enabled);
   const [currentNode, setCurrentNode] = useState("");
@@ -132,19 +198,29 @@ export function useAgentWebSocket(projectId, enabled = true) {
   const [connectionState, setConnectionState] = useState("idle");
   const [logs, setLogs] = useState([]);
   const [lastEventType, setLastEventType] = useState("");
+  const [stateProjectId, setStateProjectId] = useState(projectId || "");
 
   const clearLogs = useCallback(() => {
     setLogs([]);
   }, []);
 
-  const appendLog = useCallback((type, text) => {
+  const appendLog = useCallback((type, text, meta = {}) => {
+    const normalizedType = (type || "message").toString().trim().toLowerCase() || "message";
+    const normalizedMessage = (text || "").toString();
+    const normalizedCurrentNode = normalizeNodeId(meta?.currentNode ?? meta?.current_node ?? "");
+    const normalizedStatus = (meta?.status || "").toString().trim().toLowerCase();
+    const normalizedEventType = (meta?.eventType ?? meta?.event_type ?? "").toString().trim().toLowerCase();
+
     setLogs((current) => [
       ...current,
       {
         id: `${Date.now()}-${Math.random()}`,
-        type,
-        message: text,
+        type: normalizedType,
+        message: normalizedMessage,
         at: new Date().toLocaleTimeString(),
+        currentNode: normalizedCurrentNode,
+        status: normalizedStatus,
+        eventType: normalizedEventType,
       },
     ]);
   }, []);
@@ -154,13 +230,19 @@ export function useAgentWebSocket(projectId, enabled = true) {
   const updateFinalAnswerUrl = useCallback(
     (url) => {
       if (typeof url !== "string" || !url.trim()) {
-        return;
+        return false;
+      }
+
+      const normalizedUrl = url.trim();
+      if (isHiddenIntermediateResultUrl(normalizedUrl)) {
+        return false;
       }
 
       setFinalAnswerState({
         projectId,
-        url: url.trim(),
+        url: normalizedUrl,
       });
+      return true;
     },
     [projectId]
   );
@@ -180,12 +262,14 @@ export function useAgentWebSocket(projectId, enabled = true) {
           return;
         }
 
+        setStateProjectId(projectId);
+
         if (event.type === "error") {
           setLastEventType("error");
           setConnectionState("error");
           setStatus("error");
           setMessage(event.text || "WebSocket error.");
-          appendLog("error", event.text || "WebSocket error.");
+          appendLog("error", event.text || "WebSocket error.", { eventType: "error", status: "error" });
           return;
         }
 
@@ -193,7 +277,7 @@ export function useAgentWebSocket(projectId, enabled = true) {
           setLastEventType("message");
           const text = event.text || "Socket update";
           setMessage(text);
-          appendLog("message", text);
+          appendLog("message", text, { eventType: "message" });
 
           if (text.toLowerCase().includes("connected")) {
             setConnectionState("connected");
@@ -214,22 +298,39 @@ export function useAgentWebSocket(projectId, enabled = true) {
 
         setLastEventType(payloadEventType);
 
-        const nextNode = normalizeNodeId(payload.current_node ?? data.current_node);
+        const nextNode = normalizeNodeId(payload.current_node ?? data.current_node ?? data.currentNode);
         if (nextNode) {
           setCurrentNode(nextNode);
         }
 
         const nextStatus = (payload.status ?? data.status ?? "").toString().trim().toLowerCase();
-        if (nextStatus) {
-          setStatus(nextStatus);
+        const isErrorEvent = payloadEventType === "error" || nextStatus === "error";
+        const isCompletedEvent = payloadEventType === "completed" || nextNode === "end";
+
+        if (isErrorEvent) {
+          setStatus("error");
+        } else if (isCompletedEvent) {
+          setStatus("completed");
+        } else if (nextStatus) {
+          setStatus(nextStatus === "completed" ? "processing" : nextStatus);
+        } else if (payloadEventType === "message" || payloadEventType === "stream_chunk") {
+          setStatus("processing");
         }
 
         const nextMessage = (payload.message ?? data.message ?? data.text ?? "").toString();
+        const fallbackMessage = payloadEventType === "completed" ? "Agent process completed." : `Socket update: ${nextNode || "pipeline"}`;
+        const logMessage = nextMessage || fallbackMessage;
+
+        appendLog(payloadEventType || nextStatus || "message", logMessage, {
+          currentNode: nextNode,
+          status: nextStatus,
+          eventType: payloadEventType,
+        });
+
         if (nextMessage) {
           setMessage(nextMessage);
-          appendLog(payloadEventType || nextStatus || "message", nextMessage);
         } else if (payloadEventType === "completed") {
-          appendLog("completed", "Agent process completed.");
+          setMessage(fallbackMessage);
         }
 
         const candidateUrl =
@@ -245,29 +346,46 @@ export function useAgentWebSocket(projectId, enabled = true) {
           data.output_url;
 
         const resultPayload = data.result ?? payload.result ?? {};
-        const prioritizedFinalAnswerUrl =
+        const explicitFinalAnswerUrl =
           pickFirstUrl(resultPayload?.final_answers_blob_url) ||
           pickFirstUrl(resultPayload?.final_answer_blob_url) ||
           pickFirstUrl(resultPayload?.final_answer_url) ||
-          pickFirstUrl(resultPayload?.final_answers_url);
+          pickFirstUrl(resultPayload?.final_answers_url) ||
+          pickFirstUrl(payload.final_answer_url) ||
+          pickFirstUrl(data.final_answer_url) ||
+          pickFirstUrl(payload.final_ans_url) ||
+          pickFirstUrl(data.final_ans_url) ||
+          pickFirstUrl(payload.answer_url) ||
+          pickFirstUrl(data.answer_url);
 
-        if (prioritizedFinalAnswerUrl) {
-          updateFinalAnswerUrl(prioritizedFinalAnswerUrl);
-        } else if (typeof candidateUrl === "string" && candidateUrl.trim()) {
-          updateFinalAnswerUrl(candidateUrl);
-        } else {
+        if (explicitFinalAnswerUrl && updateFinalAnswerUrl(explicitFinalAnswerUrl)) {
+          // prefer canonical final answer URL from result payload
+        } else if (isCompletedEvent) {
+          const completionFallbackUrl =
+            pickFirstUrl(resultPayload?.result_url) ||
+            pickFirstUrl(resultPayload?.output_url) ||
+            pickFirstUrl(payload.result_url) ||
+            pickFirstUrl(data.result_url) ||
+            pickFirstUrl(payload.output_url) ||
+            pickFirstUrl(data.output_url) ||
+            (typeof candidateUrl === "string" && candidateUrl.trim() ? candidateUrl.trim() : "");
+
+          if (completionFallbackUrl && isLikelyFinalAnswerUrl(completionFallbackUrl)) {
+            updateFinalAnswerUrl(completionFallbackUrl);
+          }
+
           const urlFromMessage = extractUrlFromText(nextMessage);
-          if (urlFromMessage) {
-            updateFinalAnswerUrl(urlFromMessage);
+          if (urlFromMessage && isLikelyFinalAnswerUrl(urlFromMessage) && updateFinalAnswerUrl(urlFromMessage)) {
+            // fallback to URL found in message text
           } else {
             const deepUrl = findCandidateUrlDeep(payload);
-            if (deepUrl) {
-              updateFinalAnswerUrl(deepUrl);
+            if (deepUrl && isLikelyFinalAnswerUrl(deepUrl) && updateFinalAnswerUrl(deepUrl)) {
+              // fallback to nested payload URL
             }
           }
         }
 
-        const isCompleted = payloadEventType === "completed" || nextStatus === "completed";
+        const isCompleted = isCompletedEvent;
         if (!isCompleted) {
           return;
         }
@@ -296,10 +414,11 @@ export function useAgentWebSocket(projectId, enabled = true) {
       if (isDisposed) {
         return;
       }
+      setStateProjectId(projectId);
       setConnectionState("error");
       setStatus("error");
       setMessage(error?.message || "Failed to connect WebSocket.");
-      appendLog("error", error?.message || "Failed to connect WebSocket.");
+      appendLog("error", error?.message || "Failed to connect WebSocket.", { eventType: "error", status: "error" });
     });
 
     return () => {
@@ -307,16 +426,25 @@ export function useAgentWebSocket(projectId, enabled = true) {
     };
   }, [appendLog, isEnabled, projectId, updateFinalAnswerUrl]);
 
+  const isCurrentProjectState = stateProjectId === projectId;
+  const scopedLogs = isCurrentProjectState ? logs : [];
+  const scopedCurrentNode = isCurrentProjectState ? currentNode : "";
+  const scopedStatus = isCurrentProjectState ? status : "idle";
+  const scopedMessage = isCurrentProjectState ? message : "";
+  const scopedGeneratedDocument = isCurrentProjectState ? generatedDocument : "";
+  const scopedLastEventType = isCurrentProjectState ? lastEventType : "";
+  const scopedConnectionState = isCurrentProjectState ? connectionState : "idle";
+
   return {
-    connectionState,
-    logs,
-    activeNode: currentNode,
-    currentNode,
-    status,
-    message,
-    generatedDocument,
+    connectionState: scopedConnectionState,
+    logs: scopedLogs,
+    activeNode: scopedCurrentNode,
+    currentNode: scopedCurrentNode,
+    status: scopedStatus,
+    message: scopedMessage,
+    generatedDocument: scopedGeneratedDocument,
     finalAnswerUrl,
     clearLogs,
-    lastEventType,
+    lastEventType: scopedLastEventType,
   };
 }

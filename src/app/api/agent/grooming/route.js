@@ -16,6 +16,17 @@ async function requestSaveGrooming(request, body, path) {
   });
 }
 
+async function requestGetGrooming(request, projectId, path) {
+  const query = new URLSearchParams({ project_id: projectId }).toString();
+  return fetch(buildBackendUrl(`${path}?${query}`), {
+    method: "GET",
+    headers: {
+      ...getRequestAuthHeaders(request),
+    },
+    cache: "no-store",
+  });
+}
+
 async function refreshAuth(request) {
   return fetch(buildBackendUrl("/api/core/token/refresh/"), {
     method: "POST",
@@ -51,7 +62,7 @@ export async function POST(request) {
     let usedPath = GROOMING_PATHS[0];
     let backendResponse = await requestSaveGrooming(request, postBody, usedPath);
 
-    if (backendResponse.status === 404 && (await backendResponse.clone().text()).includes('Not Found')) {
+    if (backendResponse.status === 404 && (await backendResponse.clone().text()).includes("Not Found")) {
       usedPath = GROOMING_PATHS[1];
       backendResponse = await requestSaveGrooming(request, postBody, usedPath);
     }
@@ -62,6 +73,45 @@ export async function POST(request) {
 
       if (refreshResponse.ok) {
         backendResponse = await requestSaveGrooming(request, postBody, usedPath);
+      }
+    }
+
+    const payload = await readJsonSafe(backendResponse);
+    const response = NextResponse.json(payload, { status: backendResponse.status });
+
+    if (refreshResponse?.ok) {
+      applyAuthCookies(response, refreshResponse);
+    }
+
+    return response;
+  } catch {
+    return Response.json({ message: "Agent server unreachable." }, { status: 502 });
+  }
+}
+
+export async function GET(request) {
+  const { searchParams } = new URL(request.url);
+  const projectId = (searchParams.get("project_id") || "").trim();
+
+  if (!projectId) {
+    return Response.json({ message: "project_id is required." }, { status: 400 });
+  }
+
+  try {
+    let usedPath = GROOMING_PATHS[0];
+    let backendResponse = await requestGetGrooming(request, projectId, usedPath);
+
+    if (backendResponse.status === 404 && (await backendResponse.clone().text()).includes("Not Found")) {
+      usedPath = GROOMING_PATHS[1];
+      backendResponse = await requestGetGrooming(request, projectId, usedPath);
+    }
+
+    let refreshResponse = null;
+    if (backendResponse.status === 401 || backendResponse.status === 403) {
+      refreshResponse = await refreshAuth(request);
+
+      if (refreshResponse.ok) {
+        backendResponse = await requestGetGrooming(request, projectId, usedPath);
       }
     }
 
