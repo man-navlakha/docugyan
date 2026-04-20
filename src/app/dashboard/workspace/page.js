@@ -6,7 +6,7 @@ import ReactFlow, { Background, BaseEdge, Controls, Handle, MarkerType, Position
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import "reactflow/dist/style.css";
-import { fetchDocuProcessData, fetchGroomingData, saveGroomingData } from "@/lib/api/docuApi";
+import { fetchDocuProcessData, saveGroomingData } from "@/lib/api/docuApi";
 import { useAgentWebSocket } from "@/lib/realtime/useAgentWebSocket";
 import WorkspaceSidebar from "@/components/sidebar/WorkspaceSidebar";
 
@@ -317,6 +317,65 @@ const PRIMARY_STAGE_SEQUENCE = [
 ];
 
 const PRIMARY_STAGE_SET = new Set(PRIMARY_STAGE_SEQUENCE);
+const PIPELINE_NODE_ID_BY_NORMALIZED = new Map(
+  PIPELINE_NODES.map((node) => [node.id.toLowerCase().replace(/[^a-z0-9]/g, ""), node.id])
+);
+const NODE_ID_ALIAS_TO_GRAPH_ID = new Map(
+  Object.entries({
+    start: "START",
+    input: "START",
+    query: "START",
+    orchestrator: "Orchestrator_Init",
+    orchestratorinit: "Orchestrator_Init",
+    orchestratoragent: "Orchestrator_Init",
+    extractor: "Extractor_Agent",
+    extractoragent: "Extractor_Agent",
+    extractionworkers: "Extraction_Workers",
+    questionrefiner: "Question_Refiner",
+    ragstrategyevaluator: "RAG_Strategy_Evaluator",
+    ingestionrouter: "Ingestion_Router",
+    vectorragingest: "Vector_Ingestor",
+    vectoringestor: "Vector_Ingestor",
+    vectoringest: "Vector_Ingestor",
+    graphragingest: "Graph_Ingestor",
+    graphingestor: "Graph_Ingestor",
+    graphingest: "Graph_Ingestor",
+    vectorlessingest: "Vectorless_Ingestor",
+    vectorlessingestor: "Vectorless_Ingestor",
+    domainevaluator: "Domain_Evaluator",
+    specialistrouter: "Specialist_Router",
+    academic: "Academic_Agent",
+    academicagent: "Academic_Agent",
+    academicworkers: "Academic_Workers",
+    academicaggregator: "Academic_Aggregator",
+    financial: "Financial_Agent",
+    financialagent: "Financial_Agent",
+    audit: "Audit_Agent",
+    auditagent: "Audit_Agent",
+    milvusindex: "Milvus_Index",
+    final: "END",
+    finalresult: "END",
+    end: "END",
+    completed: "END",
+    success: "END",
+    done: "END",
+  })
+);
+
+function normalizePipelineNodeId(rawNodeId) {
+  if (typeof rawNodeId !== "string" || !rawNodeId.trim()) {
+    return "";
+  }
+
+  const trimmedNodeId = rawNodeId.trim();
+  const normalizedNodeId = trimmedNodeId.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const aliasMappedNodeId = NODE_ID_ALIAS_TO_GRAPH_ID.get(normalizedNodeId);
+  if (aliasMappedNodeId) {
+    return aliasMappedNodeId;
+  }
+
+  return PIPELINE_NODE_ID_BY_NORMALIZED.get(normalizedNodeId) || trimmedNodeId;
+}
 
 function toTitleCase(value) {
   if (!value) {
@@ -516,6 +575,32 @@ function pickPreferredFinalAnswerUrl(candidates) {
   for (const candidate of normalized) {
     if (isLikelyFinalAnswerUrl(candidate)) {
       return candidate;
+    }
+  }
+
+  return "";
+}
+
+function pickAcademicAnswerMarkdownUrl(candidates) {
+  if (!Array.isArray(candidates)) {
+    return "";
+  }
+
+  for (const candidate of candidates) {
+    const normalized = normalizeUrlString(candidate);
+    if (!normalized || isHiddenIntermediateResultUrl(normalized)) {
+      continue;
+    }
+
+    const fileName = getResolvedFileName(normalized);
+    if (!fileName) {
+      continue;
+    }
+
+    const isMarkdown = fileName.endsWith(".md");
+    const isAcademicAnswer = fileName.includes("academic") && fileName.includes("answer");
+    if (isMarkdown && isAcademicAnswer) {
+      return normalized;
     }
   }
 
@@ -736,7 +821,19 @@ function mapLogToActiveNodes(message, eventType) {
     return ["Orchestrator_Init"];
   }
 
+  if (text.includes("orchestrator: graph execution started")) {
+    return ["Orchestrator_Init"];
+  }
+
+  if (text.includes("evaluator agent: classifying rag strategy")) {
+    return ["RAG_Strategy_Evaluator"];
+  }
+
   if (text.includes("extractor agent: starting parallel document extraction")) {
+    return ["Extractor_Agent", "Extraction_Workers"];
+  }
+
+  if (text.includes("extractor agent: extracting document from")) {
     return ["Extractor_Agent", "Extraction_Workers"];
   }
 
@@ -745,6 +842,10 @@ function mapLogToActiveNodes(message, eventType) {
   }
 
   if (text.includes("extractor agent: starting question refinement")) {
+    return ["Extractor_Agent", "Question_Refiner"];
+  }
+
+  if (text.includes("extractor agent: refining questions from")) {
     return ["Extractor_Agent", "Question_Refiner"];
   }
 
@@ -816,6 +917,10 @@ function mapLogToActiveNodes(message, eventType) {
     return ["Domain_Evaluator", "Specialist_Router"];
   }
 
+  if (text.includes("evaluator agent: domain classified as")) {
+    return ["Domain_Evaluator", "Specialist_Router"];
+  }
+
   if (text.includes("orchestrator: routing to academic specialist agent")) {
     return ["Specialist_Router", "Academic_Agent"];
   }
@@ -862,6 +967,11 @@ function mapLogToActiveNodes(message, eventType) {
 const SOCKET_NODE_TO_GRAPH_NODE_IDS = {
   start: ["START"],
   input: ["START"],
+  extraction_workers: ["Extraction_Workers"],
+  question_refiner: ["Question_Refiner"],
+  rag_strategy_evaluator: ["RAG_Strategy_Evaluator"],
+  rag_evaluator: ["RAG_Strategy_Evaluator"],
+  ingestion_router: ["Ingestion_Router"],
   orchestrator: ["Orchestrator_Init"],
   orchestrator_init: ["Orchestrator_Init"],
   extractor: ["Extractor_Agent"],
@@ -872,12 +982,17 @@ const SOCKET_NODE_TO_GRAPH_NODE_IDS = {
   graph_ingestor: ["Graph_Ingestor"],
   vectorless_ingest: ["Vectorless_Ingestor"],
   vectorless_ingestor: ["Vectorless_Ingestor"],
+  domain_evaluator: ["Domain_Evaluator"],
+  specialist_router: ["Specialist_Router"],
   academic: ["Academic_Agent"],
   academic_agent: ["Academic_Agent"],
+  academic_workers: ["Academic_Workers"],
+  academic_aggregator: ["Academic_Aggregator"],
   financial: ["Financial_Agent"],
   financial_agent: ["Financial_Agent"],
   audit: ["Audit_Agent"],
   audit_agent: ["Audit_Agent"],
+  milvus_index: ["Milvus_Index"],
   final: ["END"],
   final_result: ["END"],
   end: ["END"],
@@ -928,6 +1043,38 @@ function mapSocketNodeToGraphNodes(currentNode, message, eventType) {
     return ["Ingestion_Router", "Vectorless_Ingestor"];
   }
 
+  if (normalizedNode === "rag_strategy_evaluator" || normalizedNode === "rag_evaluator") {
+    if ((normalizedMessage.includes("routing") || normalizedMessage.includes("route")) && normalizedMessage.includes("vectorless")) {
+      return ["Ingestion_Router", "Vectorless_Ingestor"];
+    }
+
+    if ((normalizedMessage.includes("routing") || normalizedMessage.includes("route")) && normalizedMessage.includes("graph")) {
+      return ["Ingestion_Router", "Graph_Ingestor"];
+    }
+
+    if ((normalizedMessage.includes("routing") || normalizedMessage.includes("route")) && normalizedMessage.includes("vector")) {
+      return ["Ingestion_Router", "Vector_Ingestor"];
+    }
+
+    if (normalizedMessage.includes("strategy") && normalizedMessage.includes("vectorless")) {
+      return ["RAG_Strategy_Evaluator", "Ingestion_Router", "Vectorless_Ingestor"];
+    }
+
+    if (normalizedMessage.includes("strategy") && normalizedMessage.includes("graph")) {
+      return ["RAG_Strategy_Evaluator", "Ingestion_Router", "Graph_Ingestor"];
+    }
+
+    if (normalizedMessage.includes("strategy") && normalizedMessage.includes("vector")) {
+      return ["RAG_Strategy_Evaluator", "Ingestion_Router", "Vector_Ingestor"];
+    }
+
+    if (normalizedMessage.includes("ingestion router") || normalizedMessage.includes("ingestion_router")) {
+      return ["RAG_Strategy_Evaluator", "Ingestion_Router"];
+    }
+
+    return ["RAG_Strategy_Evaluator"];
+  }
+
   if (normalizedNode === "academic" || normalizedNode === "academic_agent") {
     if (normalizedMessage.includes("initiating workers") || normalizedMessage.includes("dispatching workers")) {
       return ["Academic_Agent", "Academic_Workers"];
@@ -960,7 +1107,45 @@ function mapSocketNodeToGraphNodes(currentNode, message, eventType) {
     return mappedByMessage && mappedByMessage.length > 0 ? mappedByMessage : ["END"];
   }
 
-  return mappedBase && mappedBase.length > 0 ? mappedBase : mappedByMessage && mappedByMessage.length > 0 ? mappedByMessage : null;
+  // Canonical fallback should participate in stage comparison rather than returning early.
+  const canonicalNodeId = normalizePipelineNodeId(normalizedNode);
+  let canonicalMapped = null;
+
+  if (canonicalNodeId === "Vector_Ingestor") {
+    canonicalMapped = ["Ingestion_Router", "Vector_Ingestor"];
+  } else if (canonicalNodeId === "Graph_Ingestor") {
+    canonicalMapped = ["Ingestion_Router", "Graph_Ingestor"];
+  } else if (canonicalNodeId === "Vectorless_Ingestor") {
+    canonicalMapped = ["Ingestion_Router", "Vectorless_Ingestor"];
+  } else if (canonicalNodeId) {
+    canonicalMapped = [canonicalNodeId];
+  }
+
+  const effectiveBase = Array.isArray(mappedBase) && mappedBase.length > 0 ? mappedBase : canonicalMapped;
+
+  const hasMappedBase = Array.isArray(effectiveBase) && effectiveBase.length > 0;
+  const hasMappedByMessage = Array.isArray(mappedByMessage) && mappedByMessage.length > 0;
+
+  if (!hasMappedBase && !hasMappedByMessage) {
+    return null;
+  }
+
+  if (!hasMappedBase) {
+    return mappedByMessage;
+  }
+
+  if (!hasMappedByMessage) {
+    return effectiveBase;
+  }
+
+  const mappedBaseStageIndex = getHighestPrimaryStageIndex(effectiveBase);
+  const mappedByMessageStageIndex = getHighestPrimaryStageIndex(mappedByMessage);
+
+  if (mappedByMessageStageIndex > mappedBaseStageIndex) {
+    return mappedByMessage;
+  }
+
+  return effectiveBase;
 }
 
 function mapSocketStatusToNodeStatus(statusValue, eventType, logType) {
@@ -1013,7 +1198,7 @@ function truncateActivityText(value, max = 88) {
 }
 
 const NODE_SOCKET_HISTORY_LIMIT = 80;
-const GRAPH_GROOMING_REPLAY_STEP_MS = 920;
+const GRAPH_GROOMING_REPLAY_STEP_MS = 560;
 const NODE_STATUS_PRIORITY = {
   idle: 0,
   success: 1,
@@ -1042,13 +1227,14 @@ function sanitizeNodeStatusById(value) {
 
   const normalized = {};
   for (const [nodeId, status] of Object.entries(value)) {
-    if (typeof nodeId !== "string" || !nodeId.trim()) {
+    const canonicalNodeId = normalizePipelineNodeId(nodeId);
+    if (!canonicalNodeId) {
       continue;
     }
 
     const nextStatus = normalizeNodeStatus(status);
     if (nextStatus !== "idle") {
-      normalized[nodeId] = nextStatus;
+      normalized[canonicalNodeId] = chooseNodeStatus(normalized[canonicalNodeId], nextStatus);
     }
   }
 
@@ -1062,7 +1248,8 @@ function sanitizeNodeSocketMessagesById(value) {
 
   const normalized = {};
   for (const [nodeId, entries] of Object.entries(value)) {
-    if (typeof nodeId !== "string" || !nodeId.trim() || !Array.isArray(entries)) {
+    const canonicalNodeId = normalizePipelineNodeId(nodeId);
+    if (!canonicalNodeId || !Array.isArray(entries)) {
       continue;
     }
 
@@ -1077,11 +1264,10 @@ function sanitizeNodeSocketMessagesById(value) {
         const type = typeof entry.type === "string" && entry.type.trim() ? entry.type.trim().toLowerCase() : "message";
         const eventType =
           typeof entry.eventType === "string" && entry.eventType.trim() ? entry.eventType.trim().toLowerCase() : type;
-        const currentNode =
-          typeof entry.currentNode === "string" && entry.currentNode.trim() ? entry.currentNode.trim().toLowerCase() : "";
+        const currentNode = normalizePipelineNodeId(entry.currentNode || entry.current_node || "") || "";
         const status = typeof entry.status === "string" && entry.status.trim() ? entry.status.trim().toLowerCase() : "";
         const at = typeof entry.at === "string" && entry.at.trim() ? entry.at.trim() : "";
-        const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : `${nodeId}-${index}`;
+        const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : `${canonicalNodeId}-${index}`;
 
         return { id, type, eventType, currentNode, status, message, at };
       })
@@ -1089,11 +1275,136 @@ function sanitizeNodeSocketMessagesById(value) {
       .slice(-NODE_SOCKET_HISTORY_LIMIT);
 
     if (nextEntries.length > 0) {
-      normalized[nodeId] = nextEntries;
+      const existingEntries = Array.isArray(normalized[canonicalNodeId]) ? normalized[canonicalNodeId] : [];
+      normalized[canonicalNodeId] = [...existingEntries, ...nextEntries].slice(-NODE_SOCKET_HISTORY_LIMIT);
     }
   }
 
   return normalized;
+}
+
+function parseObjectLikeJson(value) {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // Ignore malformed JSON snapshot payloads.
+  }
+
+  return null;
+}
+
+function coerceNodeIdList(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const next = value.trim();
+    return next ? [next] : [];
+  }
+
+  return [];
+}
+
+function extractGroomingSnapshot(source) {
+  const sourceObject = parseObjectLikeJson(source);
+  if (!sourceObject) {
+    return null;
+  }
+
+  const candidates = [
+    sourceObject.grooming_data,
+    sourceObject.groomingData,
+    sourceObject.data?.grooming_data,
+    sourceObject.data?.groomingData,
+    sourceObject.result?.grooming_data,
+    sourceObject.result?.groomingData,
+    sourceObject,
+  ];
+
+  for (const candidate of candidates) {
+    const parsedCandidate = parseObjectLikeJson(candidate);
+    if (!parsedCandidate) {
+      continue;
+    }
+
+    const hasGroomingSignal =
+      "currentNodeIds" in parsedCandidate ||
+      "current_node_ids" in parsedCandidate ||
+      "currentNode" in parsedCandidate ||
+      "current_node" in parsedCandidate ||
+      "currentNodeId" in parsedCandidate ||
+      "current_node_id" in parsedCandidate ||
+      "visitedNodeIds" in parsedCandidate ||
+      "visited_node_ids" in parsedCandidate ||
+      "visitedNodes" in parsedCandidate ||
+      "visited_nodes" in parsedCandidate ||
+      "nodeStatusById" in parsedCandidate ||
+      "node_status_by_id" in parsedCandidate ||
+      "nodeStatuses" in parsedCandidate ||
+      "node_statuses" in parsedCandidate ||
+      "nodeSocketMessagesById" in parsedCandidate ||
+      "node_socket_messages_by_id" in parsedCandidate ||
+      "nodeSocketMessages" in parsedCandidate ||
+      "node_socket_messages" in parsedCandidate ||
+      "failedNodeIds" in parsedCandidate ||
+      "failed_node_ids" in parsedCandidate ||
+      "failedNodes" in parsedCandidate ||
+      "failed_nodes" in parsedCandidate;
+
+    if (!hasGroomingSignal) {
+      continue;
+    }
+
+    return {
+      currentNodeIds: coerceNodeIdList(
+        parsedCandidate.currentNodeIds ??
+          parsedCandidate.current_node_ids ??
+          parsedCandidate.currentNode ??
+          parsedCandidate.current_node ??
+          parsedCandidate.currentNodeId ??
+          parsedCandidate.current_node_id ??
+          []
+      ),
+      visitedNodeIds: coerceNodeIdList(
+        parsedCandidate.visitedNodeIds ?? parsedCandidate.visited_node_ids ?? parsedCandidate.visitedNodes ?? parsedCandidate.visited_nodes ?? []
+      ),
+      failedNodeIds: coerceNodeIdList(
+        parsedCandidate.failedNodeIds ?? parsedCandidate.failed_node_ids ?? parsedCandidate.failedNodes ?? parsedCandidate.failed_nodes ?? []
+      ),
+      nodeStatusById:
+        parsedCandidate.nodeStatusById ?? parsedCandidate.node_status_by_id ?? parsedCandidate.nodeStatuses ?? parsedCandidate.node_statuses ?? {},
+      nodeSocketMessagesById:
+        parsedCandidate.nodeSocketMessagesById ??
+        parsedCandidate.node_socket_messages_by_id ??
+        parsedCandidate.nodeSocketMessages ??
+        parsedCandidate.node_socket_messages ??
+        {},
+      savedAt: parsedCandidate.savedAt ?? parsedCandidate.saved_at ?? 0,
+    };
+  }
+
+  return null;
 }
 
 function mergeNodeSocketMessages(previous, additions) {
@@ -1199,6 +1510,124 @@ function areNodeSocketMessageMapsEqual(a, b) {
   return true;
 }
 
+function getGroomingProgressMetric({ visitedNodeIds, nodeStatusById, nodeSocketMessagesById }) {
+  const visitedCount = sanitizeNodeIdList(visitedNodeIds, []).length;
+  const statusCount = Object.keys(sanitizeNodeStatusById(nodeStatusById)).length;
+  const messageCount = Object.values(sanitizeNodeSocketMessagesById(nodeSocketMessagesById)).reduce(
+    (count, entries) => count + (Array.isArray(entries) ? entries.length : 0),
+    0
+  );
+
+  return visitedCount * 1000 + statusCount * 100 + messageCount;
+}
+
+function getHighestPrimaryStageIndex(nodeIds) {
+  const normalizedNodeIds = sanitizeNodeIdList(nodeIds, []);
+  let highest = -1;
+
+  for (const nodeId of normalizedNodeIds) {
+    const nextIndex = PRIMARY_STAGE_SEQUENCE.indexOf(nodeId);
+    if (nextIndex > highest) {
+      highest = nextIndex;
+    }
+  }
+
+  return highest;
+}
+
+function getHighestPrimaryStageNodeId(nodeIds) {
+  const normalizedNodeIds = sanitizeNodeIdList(nodeIds, []);
+  let bestNodeId = "";
+  let bestIndex = -1;
+
+  for (const nodeId of normalizedNodeIds) {
+    const nextIndex = PRIMARY_STAGE_SEQUENCE.indexOf(nodeId);
+    if (nextIndex > bestIndex) {
+      bestIndex = nextIndex;
+      bestNodeId = nodeId;
+    }
+  }
+
+  return bestNodeId;
+}
+
+function resolveEffectiveCurrentNodeIds(snapshot) {
+  const snapshotCurrent = sanitizeNodeIdList(snapshot?.currentNodeIds, []);
+  const snapshotVisited = sanitizeNodeIdList(snapshot?.visitedNodeIds, []);
+  const snapshotStatusMap = sanitizeNodeStatusById(snapshot?.nodeStatusById);
+
+  const currentStageIndex = getHighestPrimaryStageIndex(snapshotCurrent);
+  const highestVisitedNodeId = getHighestPrimaryStageNodeId(snapshotVisited);
+  const highestVisitedStageIndex = highestVisitedNodeId ? PRIMARY_STAGE_SEQUENCE.indexOf(highestVisitedNodeId) : -1;
+
+  const processingNodeCandidates = Object.entries(snapshotStatusMap)
+    .filter(([, nextStatus]) => normalizeNodeStatus(nextStatus) === "processing")
+    .map(([nodeId]) => nodeId);
+  const highestProcessingNodeId = getHighestPrimaryStageNodeId(processingNodeCandidates);
+  const highestProcessingStageIndex = highestProcessingNodeId ? PRIMARY_STAGE_SEQUENCE.indexOf(highestProcessingNodeId) : -1;
+
+  if (highestProcessingNodeId && highestProcessingStageIndex > currentStageIndex) {
+    return [highestProcessingNodeId];
+  }
+
+  if (highestVisitedNodeId && highestVisitedStageIndex > currentStageIndex) {
+    return [highestVisitedNodeId];
+  }
+
+  if (snapshotCurrent.length > 0) {
+    return snapshotCurrent;
+  }
+
+  if (highestProcessingNodeId) {
+    return [highestProcessingNodeId];
+  }
+
+  if (highestVisitedNodeId) {
+    return [highestVisitedNodeId];
+  }
+
+  return ["START"];
+}
+
+function shouldApplyRemoteGroomingSnapshot(localSnapshot, remoteSnapshot) {
+  const localVisited = sanitizeNodeIdList(localSnapshot?.visitedNodeIds, []);
+  const localCurrent = sanitizeNodeIdList(localSnapshot?.currentNodeIds, []);
+  const remoteVisited = sanitizeNodeIdList(remoteSnapshot?.visitedNodeIds, []);
+  const remoteCurrent = sanitizeNodeIdList(remoteSnapshot?.currentNodeIds, []);
+
+  const localStageIndex = Math.max(getHighestPrimaryStageIndex(localVisited), getHighestPrimaryStageIndex(localCurrent));
+  const remoteStageIndex = Math.max(getHighestPrimaryStageIndex(remoteVisited), getHighestPrimaryStageIndex(remoteCurrent));
+
+  if (remoteStageIndex > localStageIndex) {
+    return true;
+  }
+
+  if (remoteStageIndex < localStageIndex) {
+    return false;
+  }
+
+  if (remoteVisited.length > localVisited.length) {
+    return true;
+  }
+
+  if (remoteVisited.length < localVisited.length) {
+    return false;
+  }
+
+  const remoteProgress = getGroomingProgressMetric({
+    visitedNodeIds: remoteVisited,
+    nodeStatusById: remoteSnapshot?.nodeStatusById,
+    nodeSocketMessagesById: remoteSnapshot?.nodeSocketMessagesById,
+  });
+  const localProgress = getGroomingProgressMetric({
+    visitedNodeIds: localVisited,
+    nodeStatusById: localSnapshot?.nodeStatusById,
+    nodeSocketMessagesById: localSnapshot?.nodeSocketMessagesById,
+  });
+
+  return remoteProgress >= localProgress;
+}
+
 function mergeUniqueNodes(previous, additions) {
   return Array.from(new Set([...(Array.isArray(previous) ? previous : []), ...(Array.isArray(additions) ? additions : [])]));
 }
@@ -1246,16 +1675,14 @@ function buildBootstrapProgressNodes(nodeIds) {
   return mergeUniqueNodes(bootstrap, normalizedNodeIds);
 }
 
-function getGraphStateStorageKey(projectId) {
-  return `docugyan-workspace-graph-state:${projectId}`;
-}
-
 function sanitizeNodeIdList(value, fallback = []) {
   if (!Array.isArray(value)) {
     return fallback;
   }
 
-  const normalized = value.filter((item) => typeof item === "string" && item.trim());
+  const normalized = value
+    .map((item) => normalizePipelineNodeId(item))
+    .filter((item) => typeof item === "string" && item.trim());
   return normalized.length > 0 ? Array.from(new Set(normalized)) : fallback;
 }
 
@@ -1714,6 +2141,8 @@ export default function WorkspacePage() {
   const replayCurrentNodeIdsRef = useRef(["START"]);
   const replayVisitedNodeIdsRef = useRef(["START"]);
   const replayFailedNodeIdsRef = useRef([]);
+  const nodeStatusByIdRef = useRef({});
+  const nodeSocketMessagesByIdRef = useRef({});
   const processedSocketLogIdsRef = useRef(new Set());
   const completedEventAppliedRef = useRef(false);
   const graphReplayTimerRef = useRef(null);
@@ -1914,7 +2343,7 @@ export default function WorkspacePage() {
     setDisplayFailedNodeIds([]);
 
     let index = 1;
-    graphReplayTimerRef.current = window.setInterval(() => {
+    const applyReplayStep = () => {
       if (index >= targetVisited.length) {
         if (graphReplayTimerRef.current) {
           window.clearInterval(graphReplayTimerRef.current);
@@ -1925,7 +2354,7 @@ export default function WorkspacePage() {
         setDisplayCurrentNodeIds(targetCurrent);
         setDisplayFailedNodeIds(targetFailed);
         setIsGraphReplayRunning(false);
-        return;
+        return true;
       }
 
       const nextNodeId = targetVisited[index];
@@ -1936,7 +2365,14 @@ export default function WorkspacePage() {
       if (targetFailed.includes(nextNodeId)) {
         setDisplayFailedNodeIds((prev) => mergeUniqueNodes(prev, [nextNodeId]));
       }
-    }, GRAPH_GROOMING_REPLAY_STEP_MS);
+      return false;
+    };
+
+    if (!applyReplayStep()) {
+      graphReplayTimerRef.current = window.setInterval(() => {
+        applyReplayStep();
+      }, GRAPH_GROOMING_REPLAY_STEP_MS);
+    }
 
     return () => {
       if (graphReplayTimerRef.current) {
@@ -1973,7 +2409,7 @@ export default function WorkspacePage() {
     setIsGraphReplayRunning(true);
 
     let index = Math.max(1, currentDisplayVisited.length);
-    graphReplayTimerRef.current = window.setInterval(() => {
+    const applyReplayStep = () => {
       if (index >= targetVisited.length) {
         if (graphReplayTimerRef.current) {
           window.clearInterval(graphReplayTimerRef.current);
@@ -1984,7 +2420,7 @@ export default function WorkspacePage() {
         setDisplayCurrentNodeIds(targetCurrent);
         setDisplayFailedNodeIds(targetFailed);
         setIsGraphReplayRunning(false);
-        return;
+        return true;
       }
 
       const nextNodeId = targetVisited[index];
@@ -1995,7 +2431,14 @@ export default function WorkspacePage() {
       if (targetFailed.includes(nextNodeId)) {
         setDisplayFailedNodeIds((prev) => mergeUniqueNodes(prev, [nextNodeId]));
       }
-    }, GRAPH_GROOMING_REPLAY_STEP_MS);
+      return false;
+    };
+
+    if (!applyReplayStep()) {
+      graphReplayTimerRef.current = window.setInterval(() => {
+        applyReplayStep();
+      }, GRAPH_GROOMING_REPLAY_STEP_MS);
+    }
 
     return () => {
       if (graphReplayTimerRef.current) {
@@ -2023,9 +2466,12 @@ export default function WorkspacePage() {
       (value) => value.includes("complete") || value.includes("completed") || value.includes("done") || value.includes("success")
     );
 
-    const preferredFinalAnswerUrl = pickPreferredFinalAnswerUrl([processData?.final_answer_url, finalAnswerUrl, ...(processData?.result_urls || [])]);
+    const answerCandidates = [processData?.final_answer_url, finalAnswerUrl, ...(processData?.result_urls || [])];
+    const academicAnswerMarkdownUrl = pickAcademicAnswerMarkdownUrl(answerCandidates);
+    const preferredFinalAnswerUrl = academicAnswerMarkdownUrl || pickPreferredFinalAnswerUrl(answerCandidates);
     const liveFinalAnswerUrl = resolveSourceUrl(preferredFinalAnswerUrl);
-    if (!isCompleted || !liveFinalAnswerUrl) {
+    const shouldOpenDocument = isCompleted || Boolean(academicAnswerMarkdownUrl);
+    if (!shouldOpenDocument || !liveFinalAnswerUrl) {
       return;
     }
 
@@ -2045,12 +2491,12 @@ export default function WorkspacePage() {
     }
 
     try {
-      const parsed = processData?.grooming_data;
-      if (!parsed || typeof parsed !== "object") {
+      const parsed = extractGroomingSnapshot(processData);
+      if (!parsed) {
         return;
       }
 
-      const restoredCurrent = sanitizeNodeIdList(parsed?.currentNodeIds, ["START"]);
+      const restoredCurrent = sanitizeNodeIdList(resolveEffectiveCurrentNodeIds(parsed), ["START"]);
       const restoredVisited = sanitizeNodeIdList(parsed?.visitedNodeIds, restoredCurrent);
       const restoredFailed = sanitizeNodeIdList(parsed?.failedNodeIds, []);
       const restoredNodeStatusById = sanitizeNodeStatusById(parsed?.nodeStatusById);
@@ -2072,7 +2518,7 @@ export default function WorkspacePage() {
     } catch {
       // Keep current in-memory state if grooming snapshot restore fails.
     }
-  }, [processData?.grooming_data, projectId]);
+  }, [processData, projectId]);
 
   useEffect(() => {
     if (!projectId) {
@@ -2087,14 +2533,6 @@ export default function WorkspacePage() {
       nodeSocketMessagesById,
       savedAt: Date.now(),
     };
-
-    if (typeof window !== "undefined") {
-      try {
-        window.localStorage.setItem(getGraphStateStorageKey(projectId), JSON.stringify(snapshot));
-      } catch {
-        // Ignore local cache write failures silently.
-      }
-    }
 
     const hasNodeSocketHistory = Object.values(nodeSocketMessagesById).some((entries) => Array.isArray(entries) && entries.length > 0);
     const hasNodeStatus = Object.keys(nodeStatusById).length > 0;
@@ -2119,52 +2557,8 @@ export default function WorkspacePage() {
     const syncGroomingSnapshot = async () => {
       try {
         await saveGroomingData(projectId, snapshot);
-
-        const fetched = await fetchGroomingData(projectId);
         if (isDisposed || groomingSyncRequestIdRef.current !== requestId) {
           return;
-        }
-
-        const remoteSnapshot = fetched?.grooming_data;
-        if (!remoteSnapshot || typeof remoteSnapshot !== "object") {
-          return;
-        }
-
-        const remoteSavedAt = Number(remoteSnapshot.savedAt || 0);
-        if (Number.isFinite(remoteSavedAt) && remoteSavedAt > 0 && remoteSavedAt < snapshot.savedAt) {
-          return;
-        }
-
-        const remoteCurrentNodeIds = sanitizeNodeIdList(remoteSnapshot.currentNodeIds, ["START"]);
-        const remoteVisitedNodeIds = sanitizeNodeIdList(remoteSnapshot.visitedNodeIds, remoteCurrentNodeIds);
-        const remoteFailedNodeIds = sanitizeNodeIdList(remoteSnapshot.failedNodeIds, []);
-        const remoteNodeStatusById = sanitizeNodeStatusById(remoteSnapshot.nodeStatusById);
-        const remoteNodeSocketMessagesById = sanitizeNodeSocketMessagesById(remoteSnapshot.nodeSocketMessagesById);
-
-        if (!areStringArraysEqual(currentNodeIds, remoteCurrentNodeIds)) {
-          setCurrentNodeIds(remoteCurrentNodeIds);
-        }
-
-        if (!areStringArraysEqual(visitedNodeIds, remoteVisitedNodeIds)) {
-          setVisitedNodeIds(remoteVisitedNodeIds);
-        }
-
-        if (!areStringArraysEqual(failedNodeIds, remoteFailedNodeIds)) {
-          setFailedNodeIds(remoteFailedNodeIds);
-        }
-
-        if (!areNodeStatusMapsEqual(nodeStatusById, remoteNodeStatusById)) {
-          setNodeStatusById(remoteNodeStatusById);
-        }
-
-        if (!areNodeSocketMessageMapsEqual(nodeSocketMessagesById, remoteNodeSocketMessagesById)) {
-          setNodeSocketMessagesById(remoteNodeSocketMessagesById);
-        }
-
-        const preferredSelection =
-          remoteCurrentNodeIds[0] || remoteVisitedNodeIds[remoteVisitedNodeIds.length - 1] || "";
-        if (preferredSelection) {
-          setSelectedNodeId((prev) => prev || preferredSelection);
         }
       } catch {
         // Ignore grooming sync failures silently.
@@ -2189,6 +2583,11 @@ export default function WorkspacePage() {
   }, [currentNodeIds, failedNodeIds, visitedNodeIds]);
 
   useEffect(() => {
+    nodeStatusByIdRef.current = nodeStatusById;
+    nodeSocketMessagesByIdRef.current = nodeSocketMessagesById;
+  }, [nodeSocketMessagesById, nodeStatusById]);
+
+  useEffect(() => {
     if (logs.length === 0 && lastEventType !== "completed") {
       return;
     }
@@ -2197,7 +2596,8 @@ export default function WorkspacePage() {
     const nextFailedNodeIds = [];
     const nextStatusById = {};
     const nextSocketMessagesById = {};
-    let latestMappedNodeIds = null;
+    let bestMappedNodeIds = null;
+    let bestMappedStageIndex = -1;
 
     for (const logEntry of logs) {
       const nextType = (logEntry?.type || "message").toString().toLowerCase();
@@ -2241,7 +2641,17 @@ export default function WorkspacePage() {
       let targetNodeIds = [];
       let visitedProgressNodeIds = [];
       if (mappedNodeIds && mappedNodeIds.length > 0) {
-        latestMappedNodeIds = mappedNodeIds;
+        const nextMappedStageIndex = getHighestPrimaryStageIndex(mappedNodeIds);
+        const shouldReplaceBestMapped =
+          !bestMappedNodeIds ||
+          nextMappedStageIndex > bestMappedStageIndex ||
+          (nextMappedStageIndex === bestMappedStageIndex && mappedNodeIds.length > bestMappedNodeIds.length);
+
+        if (shouldReplaceBestMapped) {
+          bestMappedNodeIds = mappedNodeIds;
+          bestMappedStageIndex = nextMappedStageIndex;
+        }
+
         targetNodeIds = mappedNodeIds;
 
         const hasOnlyStartVisited = replayVisitedNodeIdsRef.current.length === 1 && replayVisitedNodeIdsRef.current[0] === "START";
@@ -2292,14 +2702,14 @@ export default function WorkspacePage() {
       }
     }
 
-    if (latestMappedNodeIds && latestMappedNodeIds.length > 0) {
+    if (bestMappedNodeIds && bestMappedNodeIds.length > 0) {
       const previousCurrentNodeIds = currentNodeIdsRef.current;
-      setCurrentNodeIds((prev) => (areStringArraysEqual(prev, latestMappedNodeIds) ? prev : latestMappedNodeIds));
-      setSelectedNodeId((prev) => prev || latestMappedNodeIds[0] || "");
+      setCurrentNodeIds((prev) => (areStringArraysEqual(prev, bestMappedNodeIds) ? prev : bestMappedNodeIds));
+      setSelectedNodeId((prev) => prev || bestMappedNodeIds[0] || "");
       setNodeStatusById((prev) => {
         const merged = { ...prev };
         for (const nodeId of previousCurrentNodeIds) {
-          if (latestMappedNodeIds.includes(nodeId)) {
+          if (bestMappedNodeIds.includes(nodeId)) {
             continue;
           }
 
@@ -2307,7 +2717,7 @@ export default function WorkspacePage() {
             continue;
           }
 
-          merged[nodeId] = chooseNodeStatus(merged[nodeId], "success");
+          merged[nodeId] = "success";
         }
         return merged;
       });
@@ -2648,11 +3058,15 @@ export default function WorkspacePage() {
   const resolvedFinalAnswerUrl = pickPreferredFinalAnswerUrl([processData?.final_answer_url, finalAnswerUrl, ...resultUrls]);
   const isFailedState =
     [socketStatus, processStatus, eventStatus].some((value) => value.includes("failed") || value.includes("error"));
+  const hasRealtimeLogs = logs.length > 0;
+  const processStatusLooksCompleted =
+    processStatus.includes("complete") || processStatus.includes("completed") || processStatus.includes("done") || processStatus.includes("success");
+  const eventStatusLooksCompleted =
+    eventStatus.includes("complete") || eventStatus.includes("completed") || eventStatus.includes("done") || eventStatus.includes("success");
   const isCompletedState =
     Boolean(resolvedFinalAnswerUrl) ||
-    [processStatus, eventStatus].some(
-      (value) => value.includes("complete") || value.includes("completed") || value.includes("done") || value.includes("success")
-    );
+    eventStatusLooksCompleted ||
+    (!hasRealtimeLogs && processStatusLooksCompleted);
   const headerStatus = isFailedState ? "failed" : isCompletedState ? "completed" : projectId ? "processing" : "idle";
   const sidebarResultUrls = Array.from(
     new Set(
@@ -2698,6 +3112,8 @@ export default function WorkspacePage() {
       return;
     }
 
+    const liveFocusedNodeId = currentNodeIds[currentNodeIds.length - 1] || "";
+
     if (isAnimationPanelSync) {
       const nextFocusedNodeId = displayCurrentNodeIds[displayCurrentNodeIds.length - 1] || "";
       if (!nextFocusedNodeId) {
@@ -2709,12 +3125,16 @@ export default function WorkspacePage() {
     }
 
     setSelectedNodeId((prev) => {
+      if (headerStatus === "processing" && liveFocusedNodeId) {
+        return prev === liveFocusedNodeId ? prev : liveFocusedNodeId;
+      }
+
       if (prev && panelVisibleNodeIds.has(prev)) {
         return prev;
       }
       return "";
     });
-  }, [activeView, displayCurrentNodeIds, isAnimationPanelSync, panelVisibleNodeIds]);
+  }, [activeView, currentNodeIds, displayCurrentNodeIds, headerStatus, isAnimationPanelSync, panelVisibleNodeIds]);
 
   const selectedNodeDetails = useMemo(() => {
     if (!selectedNodeId || !panelVisibleNodeIds.has(selectedNodeId)) {

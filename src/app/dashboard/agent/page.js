@@ -141,6 +141,7 @@ export default function DocuAgentPage() {
       setStatusText("Initializing workspace...");
       const initRes = await fetch("/api/agent/init-docu-process", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           text: processTitle.trim() || "Untitled Workspace",
@@ -166,7 +167,7 @@ export default function DocuAgentPage() {
         formData.append("file", file);
         formData.append("folder", vercelUploadFolder);
         
-        const res = await fetch("/api/uploads/blob", { method: "POST", body: formData });
+        const res = await fetch("/api/uploads/blob", { method: "POST", credentials: "include", body: formData });
         
         // BETTER ERROR HANDLING HERE:
         if (!res.ok) {
@@ -192,6 +193,7 @@ export default function DocuAgentPage() {
       setStatusText("Awakening AI Agents...");
       const processRes = await fetch("/api/agent/process", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_id,

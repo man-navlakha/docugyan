@@ -292,18 +292,22 @@ export function useAgentWebSocket(projectId, enabled = true) {
           return;
         }
 
-        const payload = event.payload ?? {};
-        const data = payload.data ?? payload;
-        const payloadEventType = (payload.event_type ?? data.event_type ?? "message").toString().trim().toLowerCase();
+        const envelope = event.payload ?? {};
+        const payload = envelope && typeof envelope.payload === "object" && envelope.payload ? envelope.payload : envelope;
+        const data = payload && typeof payload.data === "object" && payload.data ? payload.data : payload;
+        const payloadEventType = (payload.event_type ?? data.event_type ?? envelope.event_type ?? "message")
+          .toString()
+          .trim()
+          .toLowerCase();
 
         setLastEventType(payloadEventType);
 
-        const nextNode = normalizeNodeId(payload.current_node ?? data.current_node ?? data.currentNode);
+        const nextNode = normalizeNodeId(payload.current_node ?? data.current_node ?? data.currentNode ?? envelope.current_node);
         if (nextNode) {
           setCurrentNode(nextNode);
         }
 
-        const nextStatus = (payload.status ?? data.status ?? "").toString().trim().toLowerCase();
+        const nextStatus = (payload.status ?? data.status ?? envelope.status ?? "").toString().trim().toLowerCase();
         const isErrorEvent = payloadEventType === "error" || nextStatus === "error";
         const isCompletedEvent = payloadEventType === "completed" || nextNode === "end";
 
@@ -317,7 +321,7 @@ export function useAgentWebSocket(projectId, enabled = true) {
           setStatus("processing");
         }
 
-        const nextMessage = (payload.message ?? data.message ?? data.text ?? "").toString();
+        const nextMessage = (payload.message ?? payload.text ?? data.message ?? data.text ?? envelope.message ?? envelope.text ?? "").toString();
         const fallbackMessage = payloadEventType === "completed" ? "Agent process completed." : `Socket update: ${nextNode || "pipeline"}`;
         const logMessage = nextMessage || fallbackMessage;
 
@@ -336,16 +340,21 @@ export function useAgentWebSocket(projectId, enabled = true) {
         const candidateUrl =
           payload.final_answer_url ??
           data.final_answer_url ??
+          envelope.final_answer_url ??
           payload.final_ans_url ??
           data.final_ans_url ??
+          envelope.final_ans_url ??
           payload.answer_url ??
           data.answer_url ??
+          envelope.answer_url ??
           payload.result_url ??
           data.result_url ??
+          envelope.result_url ??
           payload.output_url ??
-          data.output_url;
+          data.output_url ??
+          envelope.output_url;
 
-        const resultPayload = data.result ?? payload.result ?? {};
+        const resultPayload = data.result ?? payload.result ?? envelope.result ?? {};
         const explicitFinalAnswerUrl =
           pickFirstUrl(resultPayload?.final_answers_blob_url) ||
           pickFirstUrl(resultPayload?.final_answer_blob_url) ||
@@ -353,10 +362,13 @@ export function useAgentWebSocket(projectId, enabled = true) {
           pickFirstUrl(resultPayload?.final_answers_url) ||
           pickFirstUrl(payload.final_answer_url) ||
           pickFirstUrl(data.final_answer_url) ||
+          pickFirstUrl(envelope.final_answer_url) ||
           pickFirstUrl(payload.final_ans_url) ||
           pickFirstUrl(data.final_ans_url) ||
+          pickFirstUrl(envelope.final_ans_url) ||
           pickFirstUrl(payload.answer_url) ||
-          pickFirstUrl(data.answer_url);
+          pickFirstUrl(data.answer_url) ||
+          pickFirstUrl(envelope.answer_url);
 
         if (explicitFinalAnswerUrl && updateFinalAnswerUrl(explicitFinalAnswerUrl)) {
           // prefer canonical final answer URL from result payload
@@ -366,8 +378,10 @@ export function useAgentWebSocket(projectId, enabled = true) {
             pickFirstUrl(resultPayload?.output_url) ||
             pickFirstUrl(payload.result_url) ||
             pickFirstUrl(data.result_url) ||
+            pickFirstUrl(envelope.result_url) ||
             pickFirstUrl(payload.output_url) ||
             pickFirstUrl(data.output_url) ||
+            pickFirstUrl(envelope.output_url) ||
             (typeof candidateUrl === "string" && candidateUrl.trim() ? candidateUrl.trim() : "");
 
           if (completionFallbackUrl && isLikelyFinalAnswerUrl(completionFallbackUrl)) {

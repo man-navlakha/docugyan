@@ -4,7 +4,6 @@ const AGENT_PROXY_BASE = "/api/agent";
 
 export const LOCAL_STORAGE_KEYS = {
   userUuid: "docugyan_user_uuid",
-  accessToken: "docugyan_access_token",
   projectId: "docugyan_project_id",
   blobCollection: "docugyan_blob_collection",
   taskId: "docugyan_task_id",
@@ -141,6 +140,7 @@ async function requestJson(url, init = {}, fallbackMessage = "Request failed.") 
   try {
     response = await fetch(url, {
       cache: "no-store",
+      credentials: "include",
       ...init,
     });
   } catch {
@@ -156,6 +156,7 @@ async function requestJson(url, init = {}, fallbackMessage = "Request failed.") 
       try {
         response = await fetch(url, {
           cache: "no-store",
+          credentials: "include",
           ...init,
         });
         payload = await readJsonSafe(response);
@@ -453,17 +454,5 @@ export async function saveGroomingData(projectId, groomingData) {
       body: JSON.stringify({ project_id: projectId, grooming_data: groomingData }),
     },
     "Failed to save grooming data."
-  );
-}
-
-export async function fetchGroomingData(projectId) {
-  const nextProjectId = projectId?.trim?.() ?? projectId;
-
-  return agentRequest(
-    `/grooming?project_id=${encodeURIComponent(nextProjectId ?? "")}`,
-    {
-      method: "GET",
-    },
-    "Failed to fetch grooming data."
   );
 }

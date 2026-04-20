@@ -125,10 +125,10 @@ export default function TopNavbar() {
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',
+        credentials: 'include',
       });
       clearStoredProcessState();
       window.localStorage.removeItem(LOCAL_STORAGE_KEYS.userUuid);
-      window.localStorage.removeItem(LOCAL_STORAGE_KEYS.accessToken);
     } finally {
       router.push('/login');
       router.refresh();

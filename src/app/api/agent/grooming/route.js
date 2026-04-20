@@ -1,27 +1,63 @@
 import { NextResponse } from "next/server";
 import { applyAuthCookies } from "@/lib/auth/cookies";
 import { buildBackendUrl, getRequestAuthHeaders, readJsonSafe } from "@/lib/auth/backend";
+import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } from "@/lib/auth/config";
 
 const GROOMING_PATHS = ["/api/agent/grooming/", "/agent/grooming/"];
 
-async function requestSaveGrooming(request, body, path) {
+function splitSetCookieHeader(setCookieHeader) {
+  if (!setCookieHeader) {
+    return [];
+  }
+
+  return setCookieHeader.split(/,(?=\s*[A-Za-z0-9_-]+=)/g);
+}
+
+function getSetCookieValues(response) {
+  if (typeof response.headers.getSetCookie === "function") {
+    return response.headers.getSetCookie();
+  }
+
+  return splitSetCookieHeader(response.headers.get("set-cookie"));
+}
+
+function pickCookieValue(setCookieValues, cookieName) {
+  for (const setCookieValue of setCookieValues) {
+    const match = setCookieValue.match(new RegExp(`(?:^|\\s)${cookieName}=([^;]+)`));
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return "";
+}
+
+function extractRefreshedTokens(refreshResponse) {
+  const setCookieValues = getSetCookieValues(refreshResponse);
+  const accessToken = pickCookieValue(setCookieValues, ACCESS_COOKIE_NAME);
+  const refreshToken = pickCookieValue(setCookieValues, REFRESH_COOKIE_NAME);
+
+  return { accessToken, refreshToken };
+}
+
+async function requestSaveGrooming(request, body, path, authHeaders = getRequestAuthHeaders(request)) {
   return fetch(buildBackendUrl(path), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...getRequestAuthHeaders(request),
+      ...authHeaders,
     },
     body: JSON.stringify(body),
     cache: "no-store",
   });
 }
 
-async function requestGetGrooming(request, projectId, path) {
+async function requestGetGrooming(request, projectId, path, authHeaders = getRequestAuthHeaders(request)) {
   const query = new URLSearchParams({ project_id: projectId }).toString();
   return fetch(buildBackendUrl(`${path}?${query}`), {
     method: "GET",
     headers: {
-      ...getRequestAuthHeaders(request),
+      ...authHeaders,
     },
     cache: "no-store",
   });
@@ -31,7 +67,7 @@ async function refreshAuth(request) {
   return fetch(buildBackendUrl("/api/core/token/refresh/"), {
     method: "POST",
     headers: {
-      ...getRequestAuthHeaders(request),
+      ...getRequestAuthHeaders(request, { includeAuthorization: false }),
     },
     cache: "no-store",
   });
@@ -60,11 +96,12 @@ export async function POST(request) {
 
   try {
     let usedPath = GROOMING_PATHS[0];
-    let backendResponse = await requestSaveGrooming(request, postBody, usedPath);
+    let activeAuthHeaders = getRequestAuthHeaders(request);
+    let backendResponse = await requestSaveGrooming(request, postBody, usedPath, activeAuthHeaders);
 
-    if (backendResponse.status === 404 && (await backendResponse.clone().text()).includes("Not Found")) {
+    if (backendResponse.status === 404) {
       usedPath = GROOMING_PATHS[1];
-      backendResponse = await requestSaveGrooming(request, postBody, usedPath);
+      backendResponse = await requestSaveGrooming(request, postBody, usedPath, activeAuthHeaders);
     }
 
     let refreshResponse = null;
@@ -72,7 +109,22 @@ export async function POST(request) {
       refreshResponse = await refreshAuth(request);
 
       if (refreshResponse.ok) {
-        backendResponse = await requestSaveGrooming(request, postBody, usedPath);
+        const refreshedTokens = extractRefreshedTokens(refreshResponse);
+        activeAuthHeaders = getRequestAuthHeaders(request, {
+          accessToken: refreshedTokens.accessToken,
+          refreshToken: refreshedTokens.refreshToken,
+        });
+        backendResponse = await requestSaveGrooming(request, postBody, usedPath, activeAuthHeaders);
+
+        if (backendResponse.status === 404 && usedPath === GROOMING_PATHS[0]) {
+          usedPath = GROOMING_PATHS[1];
+          backendResponse = await requestSaveGrooming(request, postBody, usedPath, activeAuthHeaders);
+        }
+      }
+
+      if ((backendResponse.status === 401 || backendResponse.status === 403) && usedPath === GROOMING_PATHS[0]) {
+        usedPath = GROOMING_PATHS[1];
+        backendResponse = await requestSaveGrooming(request, postBody, usedPath, activeAuthHeaders);
       }
     }
 
@@ -99,11 +151,12 @@ export async function GET(request) {
 
   try {
     let usedPath = GROOMING_PATHS[0];
-    let backendResponse = await requestGetGrooming(request, projectId, usedPath);
+    let activeAuthHeaders = getRequestAuthHeaders(request);
+    let backendResponse = await requestGetGrooming(request, projectId, usedPath, activeAuthHeaders);
 
-    if (backendResponse.status === 404 && (await backendResponse.clone().text()).includes("Not Found")) {
+    if (backendResponse.status === 404) {
       usedPath = GROOMING_PATHS[1];
-      backendResponse = await requestGetGrooming(request, projectId, usedPath);
+      backendResponse = await requestGetGrooming(request, projectId, usedPath, activeAuthHeaders);
     }
 
     let refreshResponse = null;
@@ -111,7 +164,22 @@ export async function GET(request) {
       refreshResponse = await refreshAuth(request);
 
       if (refreshResponse.ok) {
-        backendResponse = await requestGetGrooming(request, projectId, usedPath);
+        const refreshedTokens = extractRefreshedTokens(refreshResponse);
+        activeAuthHeaders = getRequestAuthHeaders(request, {
+          accessToken: refreshedTokens.accessToken,
+          refreshToken: refreshedTokens.refreshToken,
+        });
+        backendResponse = await requestGetGrooming(request, projectId, usedPath, activeAuthHeaders);
+
+        if (backendResponse.status === 404 && usedPath === GROOMING_PATHS[0]) {
+          usedPath = GROOMING_PATHS[1];
+          backendResponse = await requestGetGrooming(request, projectId, usedPath, activeAuthHeaders);
+        }
+      }
+
+      if ((backendResponse.status === 401 || backendResponse.status === 403) && usedPath === GROOMING_PATHS[0]) {
+        usedPath = GROOMING_PATHS[1];
+        backendResponse = await requestGetGrooming(request, projectId, usedPath, activeAuthHeaders);
       }
     }
 

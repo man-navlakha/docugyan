@@ -7,7 +7,6 @@ import { GoogleLogin } from "@react-oauth/google";
 import BrandLogo from "@/components/BrandLogo";
 import {
   LOCAL_STORAGE_KEYS,
-  fetchAccessToken,
   googleLogin,
   loginSignUp,
   resendOtp,
@@ -91,22 +90,14 @@ export default function LoginPage() {
     };
   }, []);
 
-  const persistSessionState = async (userUuid) => {
+  const persistSessionState = (userUuid) => {
     if (userUuid) {
       window.localStorage.setItem(LOCAL_STORAGE_KEYS.userUuid, userUuid);
-    }
-    try {
-      const tokenPayload = await fetchAccessToken();
-      if (tokenPayload?.access_token) {
-        window.localStorage.setItem(LOCAL_STORAGE_KEYS.accessToken, tokenPayload.access_token);
-      }
-    } catch {
-      window.localStorage.removeItem(LOCAL_STORAGE_KEYS.accessToken);
     }
   };
 
   const completeAuthAndRedirect = useCallback(async (message, userUuid) => {
-    await persistSessionState(userUuid);
+    persistSessionState(userUuid);
     setStatusMessage("");
     setSuccessText(message ?? "Redirecting to DocuAgent...");
     setRedirectStartedAt(Date.now());

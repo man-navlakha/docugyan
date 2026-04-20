@@ -30,7 +30,7 @@ async function refreshAccessToken(request) {
   return fetch(buildBackendUrl("/api/core/token/refresh/"), {
     method: "POST",
     headers: {
-      ...getRequestAuthHeaders(request),
+      ...getRequestAuthHeaders(request, { includeAuthorization: false }),
     },
     cache: "no-store",
   });

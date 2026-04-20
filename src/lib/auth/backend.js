@@ -12,15 +12,19 @@ export async function readJsonSafe(response) {
   }
 }
 
-export function getRequestAuthHeaders(request) {
+export function getRequestAuthHeaders(request, options = {}) {
+  const includeAuthorization = options?.includeAuthorization !== false;
+  const accessTokenOverride = typeof options?.accessToken === "string" ? options.accessToken.trim() : "";
+  const refreshTokenOverride = typeof options?.refreshToken === "string" ? options.refreshToken.trim() : "";
+  const rawCookieOverride = typeof options?.cookieHeader === "string" ? options.cookieHeader.trim() : "";
   const headers = {};
-  const authHeader = request.headers.get("authorization");
-  const accessCookie = request.cookies?.get("access")?.value;
-  const refreshCookie = request.cookies?.get("refresh")?.value;
+  const authHeader = includeAuthorization ? request.headers.get("authorization") : "";
+  const accessCookie = accessTokenOverride || request.cookies?.get("access")?.value || "";
+  const refreshCookie = refreshTokenOverride || request.cookies?.get("refresh")?.value || "";
 
-  if (authHeader) {
+  if (includeAuthorization && authHeader) {
     headers.Authorization = authHeader;
-  } else if (accessCookie) {
+  } else if (includeAuthorization && accessCookie) {
     headers.Authorization = `Bearer ${accessCookie}`;
   }
 
@@ -33,6 +37,11 @@ export function getRequestAuthHeaders(request) {
   }
   if (cookiePairs.length > 0) {
     headers.Cookie = cookiePairs.join("; ");
+  } else {
+    const rawCookieHeader = rawCookieOverride || request.headers.get("cookie") || "";
+    if (rawCookieHeader) {
+      headers.Cookie = rawCookieHeader;
+    }
   }
 
   return headers;

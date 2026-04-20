@@ -7,7 +7,7 @@ export async function POST(request) {
     const backendResponse = await fetch(buildBackendUrl("/api/core/token/refresh/"), {
       method: "POST",
       headers: {
-        ...getRequestAuthHeaders(request),
+        ...getRequestAuthHeaders(request, { includeAuthorization: false }),
       },
       cache: "no-store",
     });
