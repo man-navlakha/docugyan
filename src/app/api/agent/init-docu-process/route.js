@@ -37,7 +37,9 @@ export async function POST(request) {
 
   const text = typeof body?.text === "string" ? body.text.trim() : "";
   const description = typeof body?.description === "string" ? body.description.trim() : "";
+  const userUuid = typeof body?.user_uuid === "string" ? body.user_uuid.trim() : "";
   const initBody = {
+    ...(userUuid ? { user_uuid: userUuid } : {}),
     ...(text ? { text } : {}),
     ...(description ? { description } : {}),
   };

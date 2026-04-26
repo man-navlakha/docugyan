@@ -67,6 +67,12 @@ export default function TopNavbar() {
                 <span className="absolute inset-x-3 -bottom-0.5 h-[2px] rounded-full bg-gradient-to-r from-violet-500 to-indigo-500 shadow-[0_0_8px_rgba(139,92,246,0.5)]" />
               )}
             </Link>
+            <Link
+              href="/help"
+              className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-400 transition-colors hover:text-slate-100"
+            >
+              Help Center
+            </Link>
           </nav>
         </div>
 
@@ -133,6 +139,12 @@ export default function TopNavbar() {
           }`}
         >
           DocuAgent
+        </Link>
+        <Link
+          href="/help"
+          className="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-200"
+        >
+          Help Center
         </Link>
       </nav>
     </header>

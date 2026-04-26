@@ -214,6 +214,9 @@ export default function LoginPage() {
           <BrandLogo href="/" />
           <h1 className="mt-6 text-2xl font-bold tracking-tight text-white">Welcome back</h1>
           <p className="mt-2 text-sm text-slate-400">Sign in to your DocuGyan workspace</p>
+          <Link href="/help" className="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-violet-300 hover:text-violet-200">
+            Need help?
+          </Link>
         </div>
 
         {/* Alerts */}

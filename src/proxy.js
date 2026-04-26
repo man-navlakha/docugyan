@@ -6,9 +6,14 @@ import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } from "@/lib/auth/config";
 const DASHBOARD_PATH = "/dashboard/agent";
 const LOGIN_PATH = "/login";
 const OTP_PATH = "/otp-verification";
+const HELP_PATH = "/help";
+
+function isAuthOnlyPublicPath(pathname) {
+  return pathname === LOGIN_PATH || pathname === OTP_PATH;
+}
 
 function isPublicPath(pathname) {
-  return pathname === LOGIN_PATH || pathname === OTP_PATH;
+  return isAuthOnlyPublicPath(pathname) || pathname === HELP_PATH || pathname.startsWith(`${HELP_PATH}/`);
 }
 
 function isLoginPath(pathname) {
@@ -41,12 +46,13 @@ export async function proxy(request) {
   const isRootRoute = pathname === "/";
   const isLoginRoute = isLoginPath(pathname);
   const isPublicRoute = isPublicPath(pathname);
+  const isAuthOnlyRoute = isAuthOnlyPublicPath(pathname);
 
   const accessToken = request.cookies.get(ACCESS_COOKIE_NAME)?.value;
   const refreshToken = request.cookies.get(REFRESH_COOKIE_NAME)?.value;
 
   if (accessToken) {
-    if (isRootRoute || isPublicRoute) {
+    if (isRootRoute || isAuthOnlyRoute) {
       return NextResponse.redirect(new URL(DASHBOARD_PATH, request.url));
     }
 
@@ -58,7 +64,7 @@ export async function proxy(request) {
       const refreshResponse = await refreshAccessToken(request);
 
       if (refreshResponse.ok) {
-        const response = isRootRoute || isPublicRoute
+        const response = isRootRoute || isAuthOnlyRoute
           ? NextResponse.redirect(new URL(DASHBOARD_PATH, request.url))
           : NextResponse.next();
 
@@ -86,7 +92,13 @@ export async function proxy(request) {
     return response;
   }
 
-  if (isRootRoute || isPublicRoute) {
+  if (isPublicRoute) {
+    const response = NextResponse.next();
+    clearAuthCookies(response);
+    return response;
+  }
+
+  if (isRootRoute) {
     const response = NextResponse.redirect(new URL(LOGIN_PATH, request.url));
     clearAuthCookies(response);
     return response;

@@ -8,6 +8,9 @@ export default function Home() {
         <header className="mb-12 flex items-center justify-between">
           <BrandLogo />
           <div className="flex items-center gap-3 text-sm font-medium text-slate-300">
+            <Link href="/help" className="rounded-xl border border-white/20 px-4 py-2 hover:border-white/50">
+              Help
+            </Link>
             <Link href="/login" className="rounded-xl border border-white/20 px-4 py-2 hover:border-white/50">
               Login
             </Link>
@@ -32,6 +35,9 @@ export default function Home() {
               </Link>
               <Link href="/dashboard/agent" className="rounded-xl border border-white/20 px-5 py-3 text-sm font-semibold text-slate-100 hover:border-white/50">
                 Explore Dashboard
+              </Link>
+              <Link href="/help" className="rounded-xl border border-white/20 px-5 py-3 text-sm font-semibold text-slate-100 hover:border-white/50">
+                Visit Help Center
               </Link>
             </div>
           </div>

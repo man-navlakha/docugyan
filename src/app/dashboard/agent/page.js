@@ -137,12 +137,18 @@ export default function DocuAgentPage() {
     setError("");
 
     try {
+      const userUuid = window.localStorage.getItem(LOCAL_STORAGE_KEYS.userUuid)?.trim();
+      if (!userUuid) {
+        throw new Error("Session missing user UUID. Please sign in again.");
+      }
+
       // STEP 1: INITIALIZE & GET COLLECTION DIRECTORY
       setStatusText("Initializing workspace...");
       const initRes = await fetch("/api/agent/init-docu-process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
+          user_uuid: userUuid,
           text: processTitle.trim() || "Untitled Workspace",
           description: processDescription.trim() || ""
         }),
@@ -194,6 +200,7 @@ export default function DocuAgentPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          user_uuid: userUuid,
           project_id,
           reference_urls: sanitizedReferenceUrls,
           question_urls: sanitizedQuestionUrls[0] || "",

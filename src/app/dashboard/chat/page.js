@@ -384,6 +384,7 @@ export default function ChatPage() {
       await openProgressSocket(projectId);
 
       const payload = await startDocuProcess({
+        user_uuid: userUuid,
         project_id: projectId,
         reference_urls: referenceUrls,
         question_urls: questionUrls,
@@ -413,7 +414,7 @@ export default function ChatPage() {
     setProcessError("");
 
     try {
-      const payload = await initDocuProcess();
+      const payload = await initDocuProcess(userUuid);
       setProjectId(payload.project_id);
       setBlobCollection(payload.blob_collection);
       setTaskId("");

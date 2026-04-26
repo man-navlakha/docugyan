@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="x-apple-disable-message-reformatting" />
+    <title>DocuGyan — Login Confirmed</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0; padding: 0;
+        background-color: #06070d;
+        font-family: 'Plus Jakarta Sans', 'Segoe UI', Tahoma, sans-serif;
+        -webkit-text-size-adjust: 100%;
+        -ms-text-size-adjust: 100%;
+      }
+
+      table { border-spacing: 0; border-collapse: collapse; }
+      img { border: 0; line-height: 100%; outline: none; text-decoration: none; }
+
+      .preheader {
+        display: none; visibility: hidden; opacity: 0; color: transparent;
+        height: 0; width: 0; overflow: hidden; mso-hide: all;
+      }
+
+      /* ─── OUTER ─── */
+      .outer { width: 100%; padding: 36px 16px; background: #06070d; }
+
+      /* ─── CARD ─── */
+      .card {
+        width: 100%; max-width: 640px;
+        border-radius: 24px; overflow: hidden;
+        border: 1px solid #1a1f30;
+        background: #0b0d16;
+      }
+
+      /* ─── HERO BANNER ─── */
+      .hero-banner {
+        position: relative;
+        padding: 0;
+        background: #0b0d16;
+        overflow: hidden;
+      }
+      .hero-top-bar {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 20px 32px 0;
+      }
+      .brand {
+        display: inline-flex; align-items: center; gap: 8px;
+      }
+      .brand-icon {
+        width: 32px; height: 32px; border-radius: 9px;
+        background: linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%);
+        display: flex; align-items: center; justify-content: center;
+      }
+      .brand-name {
+        font-size: 15px; font-weight: 700; color: #e8edff; letter-spacing: -0.01em;
+      }
+      .badge-success {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 5px 12px; border-radius: 999px;
+        background: rgba(16,185,129,0.1);
+        border: 1px solid rgba(16,185,129,0.25);
+      }
+      .badge-dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: #10b981;
+        box-shadow: 0 0 0 2px rgba(16,185,129,0.25);
+      }
+      .badge-label {
+        font-size: 11px; font-weight: 700; color: #34d399;
+        letter-spacing: 0.07em; text-transform: uppercase;
+      }
+
+      /* HERO GRAPHIC AREA */
+      .hero-graphic {
+        padding: 28px 32px 0;
+        display: flex; align-items: flex-end; gap: 0;
+      }
+      .hero-text-block { flex: 1; padding-bottom: 28px; }
+      .hero-eyebrow {
+        font-size: 11px; font-weight: 700; color: #4a5880;
+        letter-spacing: 0.1em; text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .hero-heading {
+        font-size: 32px; font-weight: 700; color: #eef2ff;
+        line-height: 1.18; letter-spacing: -0.03em;
+        margin: 0 0 14px;
+      }
+      .hero-heading span {
+        background: linear-gradient(90deg, #a78bfa 0%, #60a5fa 100%);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .hero-sub {
+        font-size: 14px; color: #6370a0; line-height: 1.7; margin: 0;
+        max-width: 340px;
+      }
+
+      /* Shield SVG area */
+      .hero-shield-wrap {
+        width: 120px; flex-shrink: 0;
+        display: flex; align-items: flex-end; justify-content: center;
+        padding-bottom: 0;
+      }
+
+      /* ─── STRIP DIVIDER ─── */
+      .accent-strip {
+        height: 3px;
+        background: linear-gradient(90deg, #8b5cf6 0%, #3b82f6 50%, transparent 100%);
+        margin: 0;
+      }
+
+      /* ─── BODY CONTENT ─── */
+      .body-pad { padding: 28px 32px; }
+
+      .greeting {
+        font-size: 15px; color: #8898bb; line-height: 1.6; margin: 0 0 24px;
+      }
+      .greeting strong { color: #c8d5f0; font-weight: 600; }
+
+      /* ─── DETAIL GRID ─── */
+      .section-label {
+        font-size: 10px; font-weight: 700; color: #3a4560;
+        letter-spacing: 0.12em; text-transform: uppercase;
+        margin: 0 0 12px;
+      }
+
+      .detail-grid {
+        width: 100%; border-radius: 14px; overflow: hidden;
+        border: 1px solid #171c2c;
+        margin-bottom: 24px;
+      }
+      .detail-row {
+        display: flex; align-items: center;
+        padding: 12px 16px; gap: 12px;
+        border-bottom: 1px solid #131826;
+      }
+      .detail-row:last-child { border-bottom: 0; }
+      .detail-row:nth-child(even) { background: rgba(255,255,255,0.012); }
+
+      .row-icon-wrap {
+        width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(59,130,246,0.08);
+        border: 1px solid rgba(59,130,246,0.12);
+      }
+      .row-label {
+        flex: 1; font-size: 13px; font-weight: 500; color: #4e5e88;
+      }
+      .row-value {
+        font-size: 13px; font-weight: 500; color: #c2cef0;
+        font-family: 'JetBrains Mono', monospace;
+        text-align: right; max-width: 260px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+
+      /* ─── ALERT BOX ─── */
+      .alert-box {
+        display: flex; gap: 14px; align-items: flex-start;
+        background: rgba(245,158,11,0.05);
+        border: 1px solid rgba(245,158,11,0.18);
+        border-left: 3px solid #d97706;
+        border-radius: 12px;
+        padding: 14px 16px;
+        margin-bottom: 28px;
+      }
+      .alert-icon-wrap {
+        width: 32px; height: 32px; flex-shrink: 0; border-radius: 8px;
+        background: rgba(245,158,11,0.1);
+        display: flex; align-items: center; justify-content: center;
+      }
+      .alert-copy { flex: 1; }
+      .alert-title {
+        font-size: 13px; font-weight: 700; color: #f59e0b;
+        margin: 0 0 4px; letter-spacing: -0.01em;
+      }
+      .alert-body {
+        font-size: 13px; color: #917240; line-height: 1.6; margin: 0;
+      }
+
+      /* ─── ACTIONS ─── */
+      .actions-row {
+        padding: 0 32px 28px;
+        display: flex; gap: 10px;
+      }
+      .btn {
+        display: inline-block; border-radius: 12px;
+        padding: 13px 22px; font-size: 14px; font-weight: 700;
+        text-decoration: none; letter-spacing: -0.01em;
+        font-family: 'Plus Jakarta Sans', 'Segoe UI', Tahoma, sans-serif;
+      }
+      .btn-primary {
+        background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);
+        color: #ffffff !important;
+      }
+      .btn-ghost {
+        background: rgba(239,68,68,0.07);
+        border: 1px solid rgba(239,68,68,0.22);
+        color: #f87171 !important;
+      }
+
+      /* ─── FOOTER ─── */
+      .footer-divider { height: 1px; background: #111621; }
+      .footer-row {
+        padding: 18px 32px 22px;
+        display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      }
+      .footer-left { font-size: 12px; color: #2e3856; line-height: 1.55; }
+      .footer-right { font-size: 12px; white-space: nowrap; }
+      .footer-right a {
+        color: #3f5080 !important; text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+
+      /* ─── RESPONSIVE ─── */
+      @media only screen and (max-width: 600px) {
+        .outer { padding: 16px 8px !important; }
+        .card { border-radius: 18px !important; }
+        .hero-top-bar, .hero-graphic, .body-pad { padding-left: 20px !important; padding-right: 20px !important; }
+        .hero-heading { font-size: 24px !important; }
+        .hero-shield-wrap { display: none !important; }
+        .actions-row { padding: 0 20px 24px !important; flex-direction: column !important; }
+        .btn { display: block !important; text-align: center !important; width: 100% !important; }
+        .footer-row { padding: 16px 20px 18px !important; flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
+        .row-value { max-width: 160px !important; }
+        .detail-row { flex-wrap: wrap !important; }
+        .row-label { flex: unset !important; width: 100% !important; margin-bottom: 2px; }
+        .row-value { text-align: left !important; width: 100% !important; max-width: none !important; padding-left: 42px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="preheader">Login successful on DocuGyan. Review your sign-in details and secure your account if needed.</div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" class="outer">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" class="card">
+
+            <!-- ═══ HERO ═══ -->
+            <tr>
+              <td class="hero-banner">
+
+                <!-- Top bar: brand + status -->
+                <div class="hero-top-bar">
+                  <div class="brand">
+                    <div class="brand-icon">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <polyline points="14 2 14 8 20 8" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                    </div>
+                    <span class="brand-name">DocuGyan</span>
+                  </div>
+                  <div class="badge-success">
+                    <div class="badge-dot"></div>
+                    <span class="badge-label">Verified Login</span>
+                  </div>
+                </div>
+
+                <!-- Hero text + shield illustration -->
+                <div class="hero-graphic">
+                  <div class="hero-text-block">
+                    <div class="hero-eyebrow">Account Security</div>
+                    <h1 class="hero-heading">Your access is<br><span>confirmed &amp; secure</span></h1>
+                    <p class="hero-sub">A new session was started on your DocuGyan account. Review the details below to make sure it was you.</p>
+                  </div>
+                  <div class="hero-shield-wrap">
+                    <svg width="110" height="130" viewBox="0 0 110 130" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <!-- Shield glow bg -->
+                      <ellipse cx="55" cy="115" rx="36" ry="8" fill="rgba(139,92,246,0.12)"/>
+                      <!-- Shield body -->
+                      <path d="M55 8 L92 22 L92 58 C92 83 73 102 55 114 C37 102 18 83 18 58 L18 22 Z" fill="rgba(139,92,246,0.08)" stroke="url(#shieldGrad)" stroke-width="1.5"/>
+                      <!-- Inner shield highlight -->
+                      <path d="M55 18 L84 30 L84 58 C84 79 68 95 55 106 C42 95 26 79 26 58 L26 30 Z" fill="rgba(59,130,246,0.05)" stroke="rgba(99,102,241,0.25)" stroke-width="1"/>
+                      <!-- Check mark -->
+                      <circle cx="55" cy="62" r="18" fill="rgba(16,185,129,0.12)" stroke="rgba(16,185,129,0.3)" stroke-width="1.5"/>
+                      <polyline points="45,62 52,69 66,53" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                      <!-- Top lock -->
+                      <rect x="47" y="28" width="16" height="12" rx="3" fill="rgba(139,92,246,0.15)" stroke="rgba(139,92,246,0.35)" stroke-width="1"/>
+                      <path d="M50 28 L50 25 C50 21.7 60 21.7 60 25 L60 28" stroke="rgba(139,92,246,0.5)" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+                      <circle cx="55" cy="34" r="2" fill="#8b5cf6" opacity="0.7"/>
+                      <defs>
+                        <linearGradient id="shieldGrad" x1="18" y1="8" x2="92" y2="114" gradientUnits="userSpaceOnUse">
+                          <stop offset="0%" stop-color="#8b5cf6"/>
+                          <stop offset="100%" stop-color="#3b82f6"/>
+                        </linearGradient>
+                      </defs>
+                    </svg>
+                  </div>
+                </div>
+
+              </td>
+            </tr>
+
+            <!-- Accent strip -->
+            <tr><td class="accent-strip"></td></tr>
+
+            <!-- ═══ BODY ═══ -->
+            <tr>
+              <td class="body-pad">
+
+                <p class="greeting">Hi <strong>{{ first_name }}</strong>, your account login is verified and active. You can continue working with documents, chat, and AI tools in your workspace.</p>
+
+                <!-- Detail grid -->
+                <div class="section-label">Login Details</div>
+                <div class="detail-grid">
+
+                  {% if login_time %}
+                  <div class="detail-row">
+                    <div class="row-icon-wrap">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="12" r="9" stroke="#60a5fa" stroke-width="1.8"/>
+                        <polyline points="12 7 12 12 15.5 14.5" stroke="#60a5fa" stroke-width="1.8" stroke-linecap="round"/>
+                      </svg>
+                    </div>
+                    <span class="row-label">Login time</span>
+                    <span class="row-value">{{ login_time }}</span>
+                  </div>
+                  {% endif %}
+
+                  {% if login_ip %}
+                  <div class="detail-row">
+                    <div class="row-icon-wrap">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="12" r="9" stroke="#60a5fa" stroke-width="1.8"/>
+                        <path d="M12 3a14.5 14.5 0 0 1 0 18M3 12h18M12 3a14.5 14.5 0 0 0 0 18" stroke="#60a5fa" stroke-width="1.5" stroke-linecap="round"/>
+                      </svg>
+                    </div>
+                    <span class="row-label">IP address</span>
+                    <span class="row-value">{{ login_ip }}</span>
+                  </div>
+                  {% endif %}
+
+                  {% if login_location %}
+                  <div class="detail-row">
+                    <div class="row-icon-wrap">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 2C8.69 2 6 4.69 6 8c0 5 6 12 6 12s6-7 6-12c0-3.31-2.69-6-6-6z" stroke="#60a5fa" stroke-width="1.8"/>
+                        <circle cx="12" cy="8" r="2.2" stroke="#60a5fa" stroke-width="1.5"/>
+                      </svg>
+                    </div>
+                    <span class="row-label">Approx location</span>
+                    <span class="row-value">{{ login_location }}</span>
+                  </div>
+                  {% endif %}
+
+                  {% if device_name %}
+                  <div class="detail-row">
+                    <div class="row-icon-wrap">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                        <rect x="5" y="2" width="14" height="20" rx="2" stroke="#60a5fa" stroke-width="1.8"/>
+                        <circle cx="12" cy="17" r="1" fill="#60a5fa"/>
+                      </svg>
+                    </div>
+                    <span class="row-label">Device</span>
+                    <span class="row-value">{{ device_name }}</span>
+                  </div>
+                  {% endif %}
+
+                  {% if browser or os %}
+                  <div class="detail-row">
+                    <div class="row-icon-wrap">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                        <rect x="2" y="4" width="20" height="14" rx="2" stroke="#60a5fa" stroke-width="1.8"/>
+                        <line x1="8" y1="20" x2="16" y2="20" stroke="#60a5fa" stroke-width="1.8" stroke-linecap="round"/>
+                        <line x1="12" y1="18" x2="12" y2="20" stroke="#60a5fa" stroke-width="1.8" stroke-linecap="round"/>
+                      </svg>
+                    </div>
+                    <span class="row-label">Browser / OS</span>
+                    <span class="row-value">{{ browser }}{% if browser and os %} / {% endif %}{{ os }}</span>
+                  </div>
+                  {% endif %}
+
+                  {% if login_method %}
+                  <div class="detail-row">
+                    <div class="row-icon-wrap">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                        <rect x="3" y="11" width="18" height="11" rx="2" stroke="#60a5fa" stroke-width="1.8"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="#60a5fa" stroke-width="1.8" stroke-linecap="round"/>
+                      </svg>
+                    </div>
+                    <span class="row-label">Sign-in method</span>
+                    <span class="row-value">{{ login_method }}</span>
+                  </div>
+                  {% endif %}
+
+                  {% if session_id %}
+                  <div class="detail-row">
+                    <div class="row-icon-wrap">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                        <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18" stroke="#60a5fa" stroke-width="1.8" stroke-linecap="round"/>
+                      </svg>
+                    </div>
+                    <span class="row-label">Session ID</span>
+                    <span class="row-value">{{ session_id }}</span>
+                  </div>
+                  {% endif %}
+
+                </div>
+
+                <!-- Alert box -->
+                <div class="alert-box">
+                  <div class="alert-icon-wrap">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" stroke="#f59e0b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                      <line x1="12" y1="9" x2="12" y2="13" stroke="#f59e0b" stroke-width="1.8" stroke-linecap="round"/>
+                      <circle cx="12" cy="17" r="0.8" fill="#f59e0b"/>
+                    </svg>
+                  </div>
+                  <div class="alert-copy">
+                    <p class="alert-title">Don't recognise this?</p>
+                    <p class="alert-body">If you didn't initiate this login, tap "This Wasn't Me" below to reset your password and revoke all active sessions immediately.</p>
+                  </div>
+                </div>
+
+              </td>
+            </tr>
+
+            <!-- ═══ ACTIONS ═══ -->
+            <tr>
+              <td class="actions-row">
+                <a href="{{ dashboard_url }}" target="_blank" rel="noopener noreferrer" class="btn btn-primary">Open Dashboard →</a>
+                <a href="{{ secure_account_url }}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost">This Wasn't Me</a>
+              </td>
+            </tr>
+
+            <!-- ═══ FOOTER ═══ -->
+            <tr><td class="footer-divider"></td></tr>
+            <tr>
+              <td class="footer-row">
+                <span class="footer-left">© DocuGyan · Secure workspace for documents &amp; AI</span>
+                <span class="footer-right"><a href="{{ support_url }}" target="_blank" rel="noopener noreferrer">Contact Support</a></span>
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

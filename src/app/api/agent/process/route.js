@@ -87,6 +87,7 @@ export async function POST(request) {
   }
 
   const projectId = body?.project_id?.trim();
+  const userUuid = typeof body?.user_uuid === "string" ? body.user_uuid.trim() : "";
   const referenceUrls = normalizeUrlArray(body?.reference_urls);
   const questionUrls = normalizeUrlArray(body?.question_urls);
 
@@ -95,6 +96,7 @@ export async function POST(request) {
   }
 
   const processBody = {
+    ...(userUuid ? { user_uuid: userUuid } : {}),
     project_id: projectId,
     reference_urls: referenceUrls,
     question_urls: questionUrls[0] || "",

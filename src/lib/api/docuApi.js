@@ -121,6 +121,10 @@ function normalizeUrlArray(value) {
   return flattened;
 }
 
+function normalizeOptionalString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 async function refreshAuthToken() {
   try {
     const response = await fetch(`${AUTH_PROXY_BASE}/refresh`, {
@@ -269,13 +273,27 @@ export async function logout() {
  * @property {string} project_id
  * @property {string} blob_collection
  */
-export async function initDocuProcess() {
+export async function initDocuProcess(input) {
+  const payloadInput =
+    typeof input === "string"
+      ? { user_uuid: input }
+      : input && typeof input === "object"
+        ? input
+        : {};
+  const userUuid = normalizeOptionalString(payloadInput.user_uuid);
+  const text = normalizeOptionalString(payloadInput.text);
+  const description = normalizeOptionalString(payloadInput.description);
+
   return agentRequest(
     "/init-docu-process",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        ...(userUuid ? { user_uuid: userUuid } : {}),
+        ...(text ? { text } : {}),
+        ...(description ? { description } : {}),
+      }),
     },
     "Failed to initialize document process."
   );
@@ -287,7 +305,8 @@ export async function initDocuProcess() {
  * @property {string=} task_id
  * @property {string=} message
  */
-export async function startDocuProcess({ project_id, reference_urls, question_urls }) {
+export async function startDocuProcess({ user_uuid, project_id, reference_urls, question_urls }) {
+  const normalizedUserUuid = normalizeOptionalString(user_uuid);
   const normalizedReferenceUrls = normalizeUrlArray(reference_urls);
   const normalizedQuestionUrls = normalizeUrlArray(question_urls);
 
@@ -297,6 +316,7 @@ export async function startDocuProcess({ project_id, reference_urls, question_ur
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        ...(normalizedUserUuid ? { user_uuid: normalizedUserUuid } : {}),
         project_id: project_id?.trim?.() ?? project_id,
         reference_urls: normalizedReferenceUrls,
         question_urls: normalizedQuestionUrls[0] ?? "",
