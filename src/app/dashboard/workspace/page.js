@@ -722,45 +722,72 @@ function splitMarkdownReferencesBlock(markdown) {
   if (typeof markdown !== "string" || !markdown.trim()) {
     return { body: "", references: [] };
   }
+  return { body: markdown, references: [] };
+}
 
-  const startMarker = "---REFERENCES---";
-  const endMarker = "---END REFERENCES---";
-  const endIndex = markdown.lastIndexOf(endMarker);
-  const startIndex = endIndex >= 0 ? markdown.lastIndexOf(startMarker, endIndex) : -1;
-
-  if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) {
-    return { body: markdown, references: [] };
+function parseMarkdownChunks(markdown) {
+  if (typeof markdown !== "string" || !markdown.trim()) {
+    return [{ type: "markdown", content: "" }];
   }
 
-  // Only extract a references block when it is truly the final block.
-  // If anything meaningful exists after END REFERENCES, keep full markdown body.
-  const afterEnd = markdown.slice(endIndex + endMarker.length).trim();
-  if (afterEnd) {
-    return { body: markdown, references: [] };
-  }
+  const refMarkerRegex = /(?:\n|^)###\s+(?:\*\*)*Refer[ea]nces?(?:\*\*)*\s*(?:\n|$)/i;
+  const chunks = [];
+  let currentMarkdown = markdown;
 
-  const body = markdown.slice(0, startIndex).trimEnd();
-  const block = markdown.slice(startIndex + startMarker.length, endIndex);
-
-  const references = block
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const match = line.match(/^\[\[ref:(\d+)\]\]\s*Title:\s*(.*?)\s*\|\s*URL:\s*(.*)$/i);
-      if (!match) {
-        return null;
+  while (true) {
+    const match = currentMarkdown.match(refMarkerRegex);
+    if (!match) {
+      if (currentMarkdown.trim()) {
+        chunks.push({ type: "markdown", content: currentMarkdown });
       }
+      break;
+    }
 
-      return {
-        id: match[1],
-        title: match[2] || "Unknown source",
-        url: match[3] || "none",
-      };
-    })
-    .filter(Boolean);
+    const startIndex = match.index;
+    let beforeContent = currentMarkdown.slice(0, startIndex);
+    beforeContent = beforeContent.replace(/(?:\r?\n)*---(?:\r?\n)*$/, "").trimEnd();
+    
+    if (beforeContent) {
+      chunks.push({ type: "markdown", content: beforeContent });
+    }
 
-  return { body, references };
+    let blockAfter = currentMarkdown.slice(startIndex + match[0].length);
+    let afterContent = "";
+
+    const nextSectionMatch = blockAfter.match(/\n(?:##+ |---)/);
+    if (nextSectionMatch) {
+      afterContent = blockAfter.slice(nextSectionMatch.index);
+      blockAfter = blockAfter.slice(0, nextSectionMatch.index);
+    }
+
+    const references = blockAfter
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.match(/^(?:-|\*|\d+\.) /))
+      .map((line, index) => {
+        let url = line.replace(/^(?:-|\*|\d+\.) /, "").trim();
+        const mdLinkMatch = url.match(/\[(.*?)\]\((.*?)\)/);
+        if (mdLinkMatch) {
+          url = mdLinkMatch[2];
+        }
+        return {
+          id: String(index + 1),
+          title: url,
+          url: url,
+        };
+      })
+      .filter((ref) => ref.url);
+
+    if (references.length > 0) {
+      chunks.push({ type: "references", references });
+    } else {
+      chunks.push({ type: "markdown", content: match[0] + blockAfter });
+    }
+
+    currentMarkdown = afterContent;
+  }
+
+  return chunks;
 }
 
 function getMarkdownFetchCandidates(url) {
@@ -2117,6 +2144,51 @@ function PipelineNode({ data }) {
 const nodeTypes = { pipeline: PipelineNode };
 const edgeTypes = { pipeline: PipelineEdge };
 
+const InlineReferences = ({ references }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  return (
+    <section className="mt-8 mb-8 border-t border-b border-white/10 py-5">
+      <button 
+        onClick={() => setIsExpanded((prev) => !prev)}
+        className="flex w-full items-center justify-between group hover:bg-white/5 rounded-lg p-2 transition-colors focus:outline-none"
+      >
+        <div className="flex items-center gap-2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-violet-300">
+            <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path>
+          </svg>
+          <h4 className="text-xs font-bold uppercase tracking-[0.14em] text-violet-300">References</h4>
+        </div>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`text-violet-300/70 group-hover:text-violet-200 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
+      
+      {isExpanded && (
+        <div className="mt-3 space-y-2 px-2 pb-2">
+          {references.map((ref) => {
+            const safeUrl = normalizeUrlString(ref.url);
+            const isLink = /^https?:\/\//i.test(safeUrl);
+
+            return (
+              <div key={ref.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs">
+                <span className="rounded-full border border-violet-400/40 bg-violet-500/15 px-2 py-0.5 font-semibold text-violet-200">ref:{ref.id}</span>
+                <span className="text-slate-200">{ref.title}</span>
+                {isLink ? (
+                  <a href={safeUrl} target="_blank" rel="noreferrer noopener" className="text-blue-300 underline decoration-blue-300/60 underline-offset-2">
+                    Open source
+                  </a>
+                ) : (
+                  <span className="text-slate-500">URL unavailable</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+};
+
 export default function WorkspacePage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -2156,6 +2228,7 @@ export default function WorkspacePage() {
   const [markdownError, setMarkdownError] = useState("");
   const [markdownImageUrlByToken, setMarkdownImageUrlByToken] = useState({});
   const markdownObjectUrlsRef = useRef([]);
+  const hasAutoOpenedFinalDocumentRef = useRef(false);
 
   const { logs, status, lastEventType, finalAnswerUrl, clearLogs } = useAgentWebSocket(projectId, {
     enabled: Boolean(projectId),
@@ -2383,13 +2456,42 @@ export default function WorkspacePage() {
   }, [activeView, graphReplayRequestId, loadingData, projectId]);
 
   useEffect(() => {
-    if (activeView !== "graph" || isGraphReplayRunning) {
+    if (activeView !== "graph") {
       return;
     }
 
-    if (graphReplayTimerRef.current) {
-      return;
-    }
+    const checkAndStep = () => {
+      const targetVisited = sanitizeNodeIdList(replayVisitedNodeIdsRef.current, ["START"]);
+      const targetCurrent = sanitizeNodeIdList(replayCurrentNodeIdsRef.current, ["START"]);
+      const targetFailed = sanitizeNodeIdList(replayFailedNodeIdsRef.current, []);
+
+      setDisplayVisitedNodeIds((currentDisplayVisited) => {
+        const needsVisitedProgress = targetVisited.length > currentDisplayVisited.length;
+
+        if (!needsVisitedProgress) {
+          setDisplayCurrentNodeIds(targetCurrent);
+          setDisplayFailedNodeIds(targetFailed);
+          setIsGraphReplayRunning(false);
+
+          if (graphReplayTimerRef.current) {
+            window.clearInterval(graphReplayTimerRef.current);
+            graphReplayTimerRef.current = null;
+          }
+
+          return currentDisplayVisited;
+        }
+
+        setIsGraphReplayRunning(true);
+        const nextNodeId = targetVisited[currentDisplayVisited.length];
+
+        setDisplayCurrentNodeIds([nextNodeId]);
+        if (targetFailed.includes(nextNodeId)) {
+          setDisplayFailedNodeIds((prev) => mergeUniqueNodes(prev, [nextNodeId]));
+        }
+
+        return mergeUniqueNodes(currentDisplayVisited, [nextNodeId]);
+      });
+    };
 
     const targetVisited = sanitizeNodeIdList(visitedNodeIds, ["START"]);
     const targetCurrent = sanitizeNodeIdList(currentNodeIds, ["START"]);
@@ -2402,50 +2504,10 @@ export default function WorkspacePage() {
     const currentNodeDiffers = !areStringArraysEqual(currentDisplayCurrent, targetCurrent);
     const failedDiffers = !areStringArraysEqual(currentDisplayFailed, targetFailed);
 
-    if (!needsVisitedProgress && !currentNodeDiffers && !failedDiffers) {
-      return;
+    if ((needsVisitedProgress || currentNodeDiffers || failedDiffers) && !graphReplayTimerRef.current) {
+      graphReplayTimerRef.current = window.setInterval(checkAndStep, GRAPH_GROOMING_REPLAY_STEP_MS);
+      checkAndStep();
     }
-
-    setIsGraphReplayRunning(true);
-
-    let index = Math.max(1, currentDisplayVisited.length);
-    const applyReplayStep = () => {
-      if (index >= targetVisited.length) {
-        if (graphReplayTimerRef.current) {
-          window.clearInterval(graphReplayTimerRef.current);
-          graphReplayTimerRef.current = null;
-        }
-
-        setDisplayVisitedNodeIds(targetVisited);
-        setDisplayCurrentNodeIds(targetCurrent);
-        setDisplayFailedNodeIds(targetFailed);
-        setIsGraphReplayRunning(false);
-        return true;
-      }
-
-      const nextNodeId = targetVisited[index];
-      index += 1;
-
-      setDisplayVisitedNodeIds((prev) => mergeUniqueNodes(prev, [nextNodeId]));
-      setDisplayCurrentNodeIds([nextNodeId]);
-      if (targetFailed.includes(nextNodeId)) {
-        setDisplayFailedNodeIds((prev) => mergeUniqueNodes(prev, [nextNodeId]));
-      }
-      return false;
-    };
-
-    if (!applyReplayStep()) {
-      graphReplayTimerRef.current = window.setInterval(() => {
-        applyReplayStep();
-      }, GRAPH_GROOMING_REPLAY_STEP_MS);
-    }
-
-    return () => {
-      if (graphReplayTimerRef.current) {
-        window.clearInterval(graphReplayTimerRef.current);
-        graphReplayTimerRef.current = null;
-      }
-    };
   }, [
     activeView,
     currentNodeIds,
@@ -2453,10 +2515,6 @@ export default function WorkspacePage() {
     displayFailedNodeIds,
     displayVisitedNodeIds,
     failedNodeIds,
-    isGraphReplayRunning,
-    lastEventType,
-    processData?.status,
-    status,
     visitedNodeIds,
   ]);
 
@@ -2470,7 +2528,7 @@ export default function WorkspacePage() {
     const academicAnswerMarkdownUrl = pickAcademicAnswerMarkdownUrl(answerCandidates);
     const preferredFinalAnswerUrl = academicAnswerMarkdownUrl || pickPreferredFinalAnswerUrl(answerCandidates);
     const liveFinalAnswerUrl = resolveSourceUrl(preferredFinalAnswerUrl);
-    const shouldOpenDocument = isCompleted || Boolean(academicAnswerMarkdownUrl);
+    const shouldOpenDocument = isCompleted || Boolean(academicAnswerMarkdownUrl) || Boolean(liveFinalAnswerUrl);
     if (!shouldOpenDocument || !liveFinalAnswerUrl) {
       return;
     }
@@ -2480,10 +2538,16 @@ export default function WorkspacePage() {
       return normalizedPrev === liveFinalAnswerUrl ? prev : liveFinalAnswerUrl;
     });
 
-    if (!forceGraphView) {
+    if (!hasAutoOpenedFinalDocumentRef.current) {
+      hasAutoOpenedFinalDocumentRef.current = true;
       setActiveView("document");
+      
+      const nextParams = new URLSearchParams(searchParams.toString());
+      nextParams.set("project", projectId);
+      nextParams.set("view", "document");
+      router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
     }
-  }, [finalAnswerUrl, forceGraphView, lastEventType, processData?.final_answer_url, processData?.result_urls, processData?.status]);
+  }, [finalAnswerUrl, lastEventType, processData?.final_answer_url, processData?.result_urls, processData?.status, pathname, projectId, router, searchParams]);
 
   useEffect(() => {
     if (!projectId) {
@@ -2905,14 +2969,147 @@ export default function WorkspacePage() {
 
   const markdownComponents = useMemo(
     () => ({
+      h1: ({ children, ...props }) => (
+        <h1 {...props} className="text-3xl md:text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-violet-300 via-white to-violet-200 mb-8 pb-4 border-b border-white/10">
+          {children}
+        </h1>
+      ),
+      h2: ({ children, ...props }) => (
+        <h2 {...props} className="text-xl md:text-2xl font-bold text-slate-100 mt-10 mb-5 flex items-center gap-3 border-b border-white/5 pb-2">
+          {children}
+        </h2>
+      ),
+      h6: ({ children, ...props }) => (
+        <h6 {...props} className="text-lg md:text-xl font-bold text-white mt-12 mb-6 border-l-[4px] border-violet-400 pl-4 py-2 bg-gradient-to-r from-violet-500/20 to-transparent rounded-r-lg shadow-sm">
+          {children}
+        </h6>
+      ),
+      h3: ({ children, ...props }) => {
+        const text = String(children).trim();
+        if (text === "References" || text === "Unanswered Questions") {
+          return (
+            <h3 {...props} className="text-xs font-bold uppercase tracking-[0.15em] text-violet-300 mt-10 mb-4 flex items-center gap-2">
+              {text === "References" ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path>
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+              )}
+              {children}
+            </h3>
+          );
+        }
+        return (
+          <h3 {...props} className="text-lg font-semibold text-slate-200 mt-8 mb-3">
+            {children}
+          </h3>
+        );
+      },
+      h4: ({ children, ...props }) => (
+        <h4 {...props} className="text-base font-semibold text-slate-200 mt-6 mb-3">
+          {children}
+        </h4>
+      ),
+      p: ({ children, ...props }) => (
+        <p {...props} className="text-slate-300 leading-[1.8] mb-5 text-[15px]">
+          {children}
+        </p>
+      ),
+      ul: ({ children, ...props }) => (
+        <ul {...props} className="list-disc marker:text-violet-500 space-y-2 mb-6 ml-5">
+          {children}
+        </ul>
+      ),
+      ol: ({ children, ...props }) => (
+        <ol {...props} className="list-decimal marker:text-violet-400 marker:font-semibold space-y-2 mb-6 ml-5 text-slate-300">
+          {children}
+        </ol>
+      ),
+      li: ({ children, ...props }) => (
+        <li {...props} className="text-slate-300 leading-relaxed pl-1 mb-1">
+          {children}
+        </li>
+      ),
+      blockquote: ({ children, ...props }) => (
+        <blockquote {...props} className="border-l-[3px] border-violet-500/60 bg-violet-500/5 px-5 py-3.5 rounded-r-xl my-6 text-slate-300 italic">
+          {children}
+        </blockquote>
+      ),
+      hr: ({ ...props }) => (
+        <hr {...props} className="my-10 border-t border-dashed border-white/20" />
+      ),
+      table: ({ children, ...props }) => (
+        <div className="overflow-x-auto my-6 rounded-xl border border-white/10 bg-black/40">
+          <table {...props} className="w-full text-left text-sm text-slate-300">
+            {children}
+          </table>
+        </div>
+      ),
+      th: ({ children, ...props }) => (
+        <th {...props} className="bg-white/5 px-4 py-3 font-semibold text-violet-200 border-b border-white/10 whitespace-nowrap">
+          {children}
+        </th>
+      ),
+      td: ({ children, ...props }) => (
+        <td {...props} className="px-4 py-3 border-b border-white/5 last:border-0 align-top">
+          {children}
+        </td>
+      ),
+      strong: ({ children, ...props }) => (
+        <strong {...props} className="font-semibold text-white">
+          {children}
+        </strong>
+      ),
+      code: ({ node, inline, className, children, ...props }) => {
+        const match = /language-(\w+)/.exec(className || '');
+        if (!inline && match) {
+          return (
+            <div className="relative my-6 rounded-xl border border-white/10 bg-[#0c0d11] overflow-hidden">
+              <div className="flex items-center px-4 py-2 bg-white/5 border-b border-white/5 text-xs text-slate-400 font-mono">
+                {match[1]}
+              </div>
+              <div className="p-4 overflow-x-auto">
+                <code className={className} {...props}>
+                  {children}
+                </code>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <code {...props} className="bg-violet-500/10 text-violet-300 border border-violet-500/20 px-1.5 py-0.5 rounded-md text-[0.85em] font-mono">
+            {children}
+          </code>
+        );
+      },
+      pre: ({ children, ...props }) => (
+        <pre {...props} className="!bg-transparent !p-0 !m-0 !border-0">
+          {children}
+        </pre>
+      ),
       img: ({ src, alt, ...props }) => {
         const tokenOrSrc = normalizeUrlString(src);
         const safeSrc = markdownImageUrlByToken[tokenOrSrc] || tokenizedMarkdown.imageByToken[tokenOrSrc] || tokenOrSrc;
         if (!isSafeMarkdownImageUrl(safeSrc)) {
           return null;
         }
-
-        return <img src={safeSrc} alt={alt || ""} loading="lazy" {...props} />;
+        return (
+          <span className="my-10 flex flex-col items-center group">
+            <img 
+              src={safeSrc} 
+              alt={alt || ""} 
+              loading="lazy" 
+              className="rounded-xl border border-white/10 bg-white/5 p-2 w-[85%] max-w-[800px] max-h-[600px] object-contain shadow-[0_0_30px_rgba(139,92,246,0.15)] ring-1 ring-white/5 transition-transform group-hover:scale-[1.02] duration-300" 
+              {...props} 
+            />
+            {alt && <span className="mt-4 text-sm font-medium text-slate-400 text-center">{alt}</span>}
+          </span>
+        );
       },
       a: ({ href, children, ...props }) => {
         if (href?.startsWith("#citation:")) {
@@ -2920,17 +3117,24 @@ export default function WorkspacePage() {
             const data = JSON.parse(decodeURIComponent(href.slice("#citation:".length)));
             if (!data || data.length === 0) return null;
             return (
-              <sup className="inline-flex gap-1 ml-1 align-top select-none">
+              <sup className="inline-flex gap-1 ml-1.5 align-top select-none">
                 {data.map((cite, i) => (
                   <a 
                     key={i} 
                     href={cite.source_url} 
                     target="_blank" 
                     rel="noreferrer noopener" 
-                    className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[9px] font-bold text-violet-300 bg-violet-500/10 border border-violet-500/30 rounded-full hover:bg-violet-500/20 hover:border-violet-500/50 transition-colors !no-underline" 
-                    title={`Source${cite.page_number ? ` • Page ${cite.page_number}` : ''}`}
+                    className="group relative inline-flex items-center justify-center h-4 min-w-[16px] px-1 text-[9px] font-bold text-violet-200 bg-violet-500/20 border border-violet-400/30 rounded hover:bg-violet-500/40 hover:border-violet-300/60 transition-all !no-underline" 
                   >
                     {i + 1}
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-max max-w-[250px] p-2.5 bg-[#1e1b2e] text-slate-200 text-xs rounded-lg border border-violet-500/30 shadow-2xl z-50 whitespace-normal text-left">
+                      <div className="font-semibold text-violet-300 mb-1 flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-[14px]">link</span>
+                        Source {i+1}
+                      </div>
+                      <div className="truncate opacity-80 mb-1">{cite.source_url}</div>
+                      {cite.page_number && <div className="font-mono text-[10px] text-emerald-400 bg-emerald-400/10 inline-block px-1.5 py-0.5 rounded mt-1">Page {cite.page_number}</div>}
+                    </div>
                   </a>
                 ))}
               </sup>
@@ -2946,7 +3150,7 @@ export default function WorkspacePage() {
         }
 
         return (
-          <a href={safeHref} target="_blank" rel="noreferrer noopener" {...props}>
+          <a href={safeHref} target="_blank" rel="noreferrer noopener" className="text-blue-400 underline decoration-blue-400/40 underline-offset-4 hover:decoration-blue-400 transition-all" {...props}>
             {children}
           </a>
         );
@@ -2987,66 +3191,6 @@ export default function WorkspacePage() {
     return activity;
   }, [lastEventType, nodeSocketMessagesById]);
 
-  const flowNodes = useMemo(
-    () =>
-      PIPELINE_NODES.map((node) => {
-        const stepIndex = PRIMARY_STAGE_SEQUENCE.indexOf(node.id);
-        const nodeActivity = nodeActivityById[node.id] || null;
-        const fallbackLiveText = currentSet.has(node.id) ? `Working: ${node.data.subtitle}` : "";
-        const trackedStatus = normalizeNodeStatus(nodeStatusById[node.id]);
-        const nodeState =
-          displayFailedSet.has(node.id) || (trackedStatus === "failed" && !isGraphReplayRunning)
-            ? "failed"
-            : displayCurrentSet.has(node.id) || (trackedStatus === "processing" && !isGraphReplayRunning)
-            ? "active"
-            : displayVisitedSet.has(node.id) || (trackedStatus === "success" && !isGraphReplayRunning)
-            ? "visited"
-            : "idle";
-
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            nodeId: node.id,
-            stepIndex,
-            isPrimaryStage: PRIMARY_STAGE_SET.has(node.id),
-            isSelected: selectedNodeId === node.id,
-            activityMessage: nodeActivity?.message || fallbackLiveText,
-            nodeState,
-          },
-        };
-      }),
-    [currentSet, displayCurrentSet, displayFailedSet, displayVisitedSet, isGraphReplayRunning, nodeActivityById, nodeStatusById, selectedNodeId]
-  );
-
-  const flowEdges = useMemo(
-    () =>
-      PIPELINE_EDGES.map((edge) => {
-        const sourceActive = displayCurrentSet.has(edge.source);
-        const targetActive = displayCurrentSet.has(edge.target);
-        const sourceVisited = displayVisitedSet.has(edge.source);
-        const targetVisited = displayVisitedSet.has(edge.target);
-        const failedEdge = displayFailedSet.has(edge.source) || displayFailedSet.has(edge.target);
-
-        const edgeState = failedEdge
-          ? "failed"
-          : sourceActive || targetActive
-          ? "active"
-          : sourceVisited && targetVisited
-          ? "visited"
-          : "idle";
-
-        return {
-          ...edge,
-          data: {
-            ...(edge.data || {}),
-            edgeState,
-          },
-        };
-      }),
-    [displayCurrentSet, displayFailedSet, displayVisitedSet]
-  );
-
   const processStatus = (processData?.status || "").toString().trim().toLowerCase();
   const socketStatus = (status || "").toString().trim().toLowerCase();
   const eventStatus = (lastEventType || "").toString().trim().toLowerCase();
@@ -3068,6 +3212,84 @@ export default function WorkspacePage() {
     eventStatusLooksCompleted ||
     (!hasRealtimeLogs && processStatusLooksCompleted);
   const headerStatus = isFailedState ? "failed" : isCompletedState ? "completed" : projectId ? "processing" : "idle";
+
+  const flowNodes = useMemo(
+    () =>
+      PIPELINE_NODES.map((node) => {
+        const stepIndex = PRIMARY_STAGE_SEQUENCE.indexOf(node.id);
+        const nodeActivity = nodeActivityById[node.id] || null;
+        const fallbackLiveText = currentSet.has(node.id) ? `Working: ${node.data.subtitle}` : "";
+        const trackedStatus = normalizeNodeStatus(nodeStatusById[node.id]);
+
+        const isFatalError =
+          headerStatus === "failed" &&
+          displayFailedSet.has(node.id) &&
+          currentNodeIds.includes(node.id);
+
+        const nodeState =
+          isFatalError && displayCurrentSet.has(node.id)
+            ? "failed"
+            : displayCurrentSet.has(node.id) || (trackedStatus === "processing" && !isGraphReplayRunning)
+            ? "active"
+            : displayVisitedSet.has(node.id) || (trackedStatus === "success" && !isGraphReplayRunning)
+            ? "visited"
+            : "idle";
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            nodeId: node.id,
+            stepIndex,
+            isPrimaryStage: PRIMARY_STAGE_SET.has(node.id),
+            isSelected: selectedNodeId === node.id,
+            activityMessage: nodeActivity?.message || fallbackLiveText,
+            nodeState,
+          },
+        };
+      }),
+    [currentNodeIds, currentSet, displayCurrentSet, displayFailedSet, displayVisitedSet, headerStatus, isGraphReplayRunning, nodeActivityById, nodeStatusById, selectedNodeId]
+  );
+
+  const flowEdges = useMemo(
+    () =>
+      PIPELINE_EDGES.map((edge) => {
+        const sourceActive = displayCurrentSet.has(edge.source);
+        const targetActive = displayCurrentSet.has(edge.target);
+        const sourceVisited = displayVisitedSet.has(edge.source);
+        const targetVisited = displayVisitedSet.has(edge.target);
+        
+        const sourceFailed =
+          headerStatus === "failed" &&
+          displayFailedSet.has(edge.source) &&
+          currentNodeIds.includes(edge.source);
+
+        const targetFailed =
+          headerStatus === "failed" &&
+          displayFailedSet.has(edge.target) &&
+          currentNodeIds.includes(edge.target);
+
+        const edgeState = targetFailed
+          ? "failed"
+          : sourceFailed
+          ? "idle"
+          : sourceActive || targetActive
+          ? "active"
+          : sourceVisited && targetVisited
+          ? "visited"
+          : "idle";
+
+        return {
+          ...edge,
+          data: {
+            ...(edge.data || {}),
+            edgeState,
+          },
+        };
+      }),
+    [currentNodeIds, displayCurrentSet, displayFailedSet, displayVisitedSet, headerStatus]
+  );
+
   const sidebarResultUrls = Array.from(
     new Set(
       [resolvedFinalAnswerUrl, ...resultUrls].filter((item) => typeof item === "string" && item.trim())
@@ -3198,12 +3420,12 @@ export default function WorkspacePage() {
       return match;
     });
 
-    // Remove empty brackets [] that the backend might send for empty citations, preserving markdown checklists
+    // Remove empty brackets [] that the backend might send for empty citations
     text = text.replace(/\s*(?<![-\*]\s*)\[\s*\]/g, "");
 
-    // Visually distinguish Question and Answer
-    text = text.replace(/^(\s*(?:>|\d+\.|-(?!\-)|\*(?!\*))*\s*)(?:\*\*)?(Question(?:\s*\d+)?|Q(?:\s*\d+)?)\s*[:.]?\s*(?:\*\*)?\s*/gmi, '\n\n---\n$1### 📝 $2:\n');
-    text = text.replace(/^(\s*(?:>|\d+\.|-(?!\-)|\*(?!\*))*\s*)(?:\*\*)?(Answer(?:\s*\d+)?|A(?:\s*\d+)?)\s*[:.]?\s*(?:\*\*)?\s*/gmi, '\n\n$1### 💡 $2:\n');
+    // Identify questions from the backend format. The backend puts `### ` at the start of each block.
+    // We convert it to `###### ` so our special h6 renderer catches it.
+    text = text.replace(/(^|\n(?:---|\*\*\*|___)\n\n)### (?!References|Unanswered Questions)(.*?)(?=\n)/g, '$1###### $2');
 
     return text;
   }, [tokenizedMarkdown.content]);
@@ -3423,35 +3645,18 @@ export default function WorkspacePage() {
                               </div>
                             ) : (
                               <article className="markdown-preview mx-auto max-w-5xl rounded-2xl border border-white/10 bg-[#11131a] px-5 py-6 text-slate-100 md:px-8 md:py-8">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents} urlTransform={markdownUrlTransform}>
-                                  {processedMarkdown}
-                                </ReactMarkdown>
-
-                                {parsedMarkdown.references.length > 0 && (
-                                  <section className="mt-8 border-t border-white/10 pt-5">
-                                    <h4 className="text-xs font-bold uppercase tracking-[0.14em] text-violet-300">References</h4>
-                                    <div className="mt-3 space-y-2">
-                                      {parsedMarkdown.references.map((ref) => {
-                                        const safeUrl = normalizeUrlString(ref.url);
-                                        const isLink = /^https?:\/\//i.test(safeUrl);
-
-                                        return (
-                                          <div key={ref.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs">
-                                            <span className="rounded-full border border-violet-400/40 bg-violet-500/15 px-2 py-0.5 font-semibold text-violet-200">ref:{ref.id}</span>
-                                            <span className="text-slate-200">{ref.title}</span>
-                                            {isLink ? (
-                                              <a href={safeUrl} target="_blank" rel="noreferrer noopener" className="text-blue-300 underline decoration-blue-300/60 underline-offset-2">
-                                                Open source
-                                              </a>
-                                            ) : (
-                                              <span className="text-slate-500">URL unavailable</span>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </section>
-                                )}
+                                {parseMarkdownChunks(processedMarkdown).map((chunk, index) => {
+                                  if (chunk.type === "markdown") {
+                                    return (
+                                      <ReactMarkdown key={index} remarkPlugins={[remarkGfm]} components={markdownComponents} urlTransform={markdownUrlTransform}>
+                                        {chunk.content}
+                                      </ReactMarkdown>
+                                    );
+                                  } else if (chunk.type === "references") {
+                                    return <InlineReferences key={index} references={chunk.references} />;
+                                  }
+                                  return null;
+                                })}
                               </article>
                             )}
                           </div>
