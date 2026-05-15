@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { LOCAL_STORAGE_KEYS, fetchWsToken } from "@/lib/api/docuApi";
+import { LOCAL_STORAGE_KEYS, fetchWsToken, getBackendBaseUrl } from "@/lib/api/docuApi";
 import { connectProcessSocket } from "@/lib/realtime/processSocketClient";
 
 export default function DocuAgentPage() {
@@ -139,7 +139,8 @@ export default function DocuAgentPage() {
     try {
       // STEP 1: INITIALIZE & GET COLLECTION DIRECTORY
       setStatusText("Initializing workspace...");
-      const initRes = await fetch("/api/agent/init-docu-process", {
+      const backendBase = getBackendBaseUrl();
+      const initRes = await fetch(`${backendBase}/api/agent/init-docu-process/`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -191,7 +192,7 @@ export default function DocuAgentPage() {
 
       // STEP 3: PROCESS AGENT
       setStatusText("Awakening AI Agents...");
-      const processRes = await fetch("/api/agent/process", {
+      const processRes = await fetch(`${backendBase}/api/agent/process/`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

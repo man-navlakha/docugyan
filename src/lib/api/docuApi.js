@@ -1,6 +1,5 @@
-const DEFAULT_BACKEND_BASE_URL = "http://127.0.0.1:8000";
-const AUTH_PROXY_BASE = "/api/auth";
-const AGENT_PROXY_BASE = "/api/agent";
+const DEFAULT_BACKEND_BASE_URL = "http://localhost:8000";
+
 
 export const LOCAL_STORAGE_KEYS = {
   userUuid: "docugyan_user_uuid",
@@ -92,7 +91,7 @@ export function parseApiError(payload, status, fallbackMessage = "Request failed
 }
 
 function shouldRetryAfterUnauthorized(url) {
-  return url.startsWith(AGENT_PROXY_BASE) || url === `${AUTH_PROXY_BASE}/access`;
+  return url.includes("/api/agent/") || url.endsWith("/api/core/token/verify/");
 }
 
 function normalizeUrlArray(value) {
@@ -122,7 +121,7 @@ function normalizeUrlArray(value) {
 
 async function refreshAuthToken() {
   try {
-    const response = await fetch(`${AUTH_PROXY_BASE}/refresh`, {
+    const response = await fetch(`${getBackendBaseUrl()}/api/core/token/refresh/`, {
       method: "POST",
       credentials: "include",
       cache: "no-store",
@@ -174,11 +173,11 @@ async function requestJson(url, init = {}, fallbackMessage = "Request failed.") 
 }
 
 function authRequest(pathname, init = {}, fallbackMessage) {
-  return requestJson(`${AUTH_PROXY_BASE}${pathname}`, { credentials: "include", ...init }, fallbackMessage);
+  return requestJson(`${getBackendBaseUrl()}${pathname}`, { credentials: "include", ...init }, fallbackMessage);
 }
 
 function agentRequest(pathname, init = {}, fallbackMessage) {
-  return requestJson(`${AGENT_PROXY_BASE}${pathname}`, { credentials: "include", ...init }, fallbackMessage);
+  return requestJson(`${getBackendBaseUrl()}/api/agent${pathname}`, { credentials: "include", ...init }, fallbackMessage);
 }
 
 /**
@@ -190,7 +189,7 @@ function agentRequest(pathname, init = {}, fallbackMessage) {
  */
 export async function loginSignUp(email) {
   return authRequest(
-    "/start",
+    "/Login_SignUp/",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -200,14 +199,9 @@ export async function loginSignUp(email) {
   );
 }
 
-/**
- * @typedef {Object} OtpVerifyResponse
- * @property {string=} user_uuid
- * @property {string=} message
- */
 export async function verifyOtp(id, otp) {
   return authRequest(
-    "/verify",
+    "/otp-verify/",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -217,14 +211,9 @@ export async function verifyOtp(id, otp) {
   );
 }
 
-/**
- * @typedef {Object} GoogleLoginResponse
- * @property {string=} user_uuid
- * @property {string=} message
- */
 export async function googleLogin(token) {
   return authRequest(
-    "/google",
+    "/google/",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -236,7 +225,7 @@ export async function googleLogin(token) {
 
 export async function resendOtp(id, key) {
   return authRequest(
-    "/resend",
+    "/resend-otp/",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -247,12 +236,14 @@ export async function resendOtp(id, key) {
 }
 
 export async function fetchAccessToken() {
-  return authRequest("/access", { method: "GET" }, "Unable to fetch access token.");
+  // If the browser has the cookie, we don't strictly need this endpoint just to check auth, 
+  // but if the backend provides it, we hit it.
+  return authRequest("/api/core/token/verify/", { method: "GET" }, "Unable to fetch access token.");
 }
 
 export async function fetchWsToken() {
   return requestJson(
-    "/api/core/ws-token/",
+    `${getBackendBaseUrl()}/api/core/ws-token/`,
     {
       method: "GET",
       credentials: "include",
@@ -262,7 +253,7 @@ export async function fetchWsToken() {
 }
 
 export async function logout() {
-  return authRequest("/logout", { method: "POST" }, "Logout failed.");
+  return authRequest("/logout-user/", { method: "POST" }, "Logout failed.");
 }
 
 /**
@@ -272,7 +263,7 @@ export async function logout() {
  */
 export async function initDocuProcess() {
   return agentRequest(
-    "/init-docu-process",
+    "/init-docu-process/",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -293,7 +284,7 @@ export async function startDocuProcess({ project_id, reference_urls, question_ur
   const normalizedQuestionUrls = normalizeUrlArray(question_urls);
 
   return agentRequest(
-    "/process",
+    "/process/",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -311,7 +302,7 @@ export async function fetchDocuProcessData(projectId) {
   const nextProjectId = projectId?.trim?.() ?? projectId;
 
   return agentRequest(
-    `/process-data?project_id=${encodeURIComponent(nextProjectId ?? "")}`,
+    `/process-data/?project_id=${encodeURIComponent(nextProjectId ?? "")}`,
     {
       method: "GET",
     },
@@ -321,7 +312,7 @@ export async function fetchDocuProcessData(projectId) {
 
 export async function fetchUserProfile() {
   return agentRequest(
-    "/user-profile",
+    "/user-profile/",
     {
       method: "GET",
     },
@@ -362,7 +353,7 @@ export async function fetchDocuProcessList({ page = 1, pageSize = 10, search = "
   }
 
   return agentRequest(
-    `/process-list?${params.toString()}`,
+    `/process-list/?${params.toString()}`,
     {
       method: "GET",
     },
@@ -435,7 +426,7 @@ export function clearStoredProcessState() {
 
 export async function deleteDocuProcess(projectId) {
   return agentRequest(
-    "/delete-process",
+    "/delete-process/",
     {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
@@ -447,7 +438,7 @@ export async function deleteDocuProcess(projectId) {
 
 export async function saveGroomingData(projectId, groomingData) {
   return agentRequest(
-    "/grooming",
+    "/grooming/",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -455,4 +446,56 @@ export async function saveGroomingData(projectId, groomingData) {
     },
     "Failed to save grooming data."
   );
+}
+
+export async function fetchChatSessionList(projectId) {
+  const backendBase = getBackendBaseUrl();
+  return requestJson(
+    `${backendBase}/api/chat/sessions/?project_id=${projectId}`,
+    {
+      method: "GET",
+    },
+    "Failed to load chat sessions."
+  );
+}
+
+export async function fetchChatSessionDetails(sessionId) {
+  const backendBase = getBackendBaseUrl();
+  return requestJson(
+    `${backendBase}/api/chat/sessions/${sessionId}/`,
+    {
+      method: "GET",
+    },
+    "Failed to load chat session details."
+  );
+}
+
+export async function deleteChatSession(sessionId) {
+  const backendBase = getBackendBaseUrl();
+  return requestJson(
+    `${backendBase}/api/chat/sessions/${sessionId}/`,
+    {
+      method: "DELETE",
+    },
+    "Failed to delete chat session."
+  );
+}
+
+export function buildChatWebSocketUrl(projectId, sessionId, accessToken) {
+  const backendBase = new URL(getBackendBaseUrl());
+  let protocol = backendBase.protocol === "https:" ? "wss:" : "ws:";
+  let host = backendBase.host;
+
+  if (typeof window !== "undefined" && backendBase.hostname === "127.0.0.1" && window.location.hostname !== "127.0.0.1" && window.location.hostname !== "localhost") {
+    host = `${window.location.hostname}:${backendBase.port || "8000"}`;
+    protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  }
+
+  const wsUrl = new URL(`/ws/chat/${projectId}/${sessionId}/`, `${protocol}//${host}`);
+
+  if (accessToken) {
+    wsUrl.searchParams.set("token", accessToken);
+  }
+
+  return wsUrl.toString();
 }

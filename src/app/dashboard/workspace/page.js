@@ -397,24 +397,19 @@ function toMessage(error, fallback) {
 }
 
 function normalizeUrlString(value) {
-  if (typeof value !== "string") {
-    return "";
+  if (typeof value !== 'string') {
+    return '';
   }
 
   let trimmed = value.trim();
   if (!trimmed) {
-    return "";
+    return '';
   }
 
-  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-    trimmed = trimmed.slice(1, -1).trim();
-  }
-
-  if ((trimmed.startsWith("\"") && trimmed.endsWith("\"")) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    trimmed = trimmed.slice(1, -1).trim();
-  }
-
-  trimmed = trimmed.replace(/[\]\"']+$/g, "").trim();
+  const listMatch = trimmed.match(/^\[\s*['"](.+?)['"]\s*\]$/);
+  if (listMatch) trimmed = listMatch[1];
+  
+  trimmed = trimmed.replace(/^['"\[]+|['"\]]+$/g, '');
 
   if (/^https?:\/(?!\/)/i.test(trimmed)) {
     return trimmed.replace(/^https?:\/(?!\/)/i, (prefix) => `${prefix}/`);
@@ -2174,7 +2169,7 @@ const InlineReferences = ({ references }) => {
                 <span className="rounded-full border border-violet-400/40 bg-violet-500/15 px-2 py-0.5 font-semibold text-violet-200">ref:{ref.id}</span>
                 <span className="text-slate-200">{ref.title}</span>
                 {isLink ? (
-                  <a href={safeUrl} target="_blank" rel="noreferrer noopener" className="text-blue-300 underline decoration-blue-300/60 underline-offset-2">
+                  <a href={buildPreviewUrl(safeUrl)} target="_blank" rel="noreferrer noopener" className="text-blue-300 underline decoration-blue-300/60 underline-offset-2">
                     Open source
                   </a>
                 ) : (
@@ -3121,7 +3116,7 @@ export default function WorkspacePage() {
                 {data.map((cite, i) => (
                   <a 
                     key={i} 
-                    href={cite.source_url} 
+                    href={buildPreviewUrl(cite.source_url)} 
                     target="_blank" 
                     rel="noreferrer noopener" 
                     className="group relative inline-flex items-center justify-center h-4 min-w-[16px] px-1 text-[9px] font-bold text-violet-200 bg-violet-500/20 border border-violet-400/30 rounded hover:bg-violet-500/40 hover:border-violet-300/60 transition-all !no-underline" 
@@ -3632,37 +3627,51 @@ export default function WorkspacePage() {
                   <div className="min-h-0 flex-1 overflow-visible rounded-xl border border-white/10 bg-black/20">
                     <div className="h-full">
                       {previewDocumentUrl ? (
-                        documentIsMarkdown ? (
-                          <div className="bg-[#0c0d11] p-4 md:p-6">
-                            {markdownLoading ? (
-                              <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-slate-300">
-                                <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-violet-300/30 border-t-violet-300" />
-                                Rendering markdown...
+                        (() => {
+                          const isImage = previewDocumentUrl.match(/\.(png|jpg|jpeg|gif|webp|bmp)(?:$|[?#])/i);
+                          
+                          if (isImage) {
+                            return (
+                              <div className="flex h-full w-full items-center justify-center p-8 overflow-auto custom-scrollbar bg-[#12121a]">
+                                <div className="relative rounded-2xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.6)] border border-white/10 bg-black/60 p-3 max-w-full m-auto inline-block">
+                                   <img src={previewDocumentUrl} alt="Document" className="max-w-full h-auto object-contain rounded-xl" />
+                                </div>
                               </div>
-                            ) : markdownError ? (
-                              <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center text-sm text-red-300">
-                                {markdownError}
-                              </div>
-                            ) : (
-                              <article className="markdown-preview mx-auto max-w-5xl rounded-2xl border border-white/10 bg-[#11131a] px-5 py-6 text-slate-100 md:px-8 md:py-8">
-                                {parseMarkdownChunks(processedMarkdown).map((chunk, index) => {
-                                  if (chunk.type === "markdown") {
-                                    return (
-                                      <ReactMarkdown key={index} remarkPlugins={[remarkGfm]} components={markdownComponents} urlTransform={markdownUrlTransform}>
-                                        {chunk.content}
-                                      </ReactMarkdown>
-                                    );
-                                  } else if (chunk.type === "references") {
-                                    return <InlineReferences key={index} references={chunk.references} />;
-                                  }
-                                  return null;
-                                })}
-                              </article>
-                            )}
-                          </div>
-                        ) : (
-                          <iframe src={previewDocumentUrl} className="h-full w-full border-0 bg-white" title="Generated Document" />
-                        )
+                            );
+                          }
+
+                          return documentIsMarkdown ? (
+                            <div className="bg-[#0c0d11] p-4 md:p-6">
+                              {markdownLoading ? (
+                                <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-slate-300">
+                                  <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-violet-300/30 border-t-violet-300" />
+                                  Rendering markdown...
+                                </div>
+                              ) : markdownError ? (
+                                <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center text-sm text-red-300">
+                                  {markdownError}
+                                </div>
+                              ) : (
+                                <article className="markdown-preview mx-auto max-w-5xl rounded-2xl border border-white/10 bg-[#11131a] px-5 py-6 text-slate-100 md:px-8 md:py-8">
+                                  {parseMarkdownChunks(processedMarkdown).map((chunk, index) => {
+                                    if (chunk.type === "markdown") {
+                                      return (
+                                        <ReactMarkdown key={index} remarkPlugins={[remarkGfm]} components={markdownComponents} urlTransform={markdownUrlTransform}>
+                                          {chunk.content}
+                                        </ReactMarkdown>
+                                      );
+                                    } else if (chunk.type === "references") {
+                                      return <InlineReferences key={index} references={chunk.references} />;
+                                    }
+                                    return null;
+                                  })}
+                                </article>
+                              )}
+                            </div>
+                          ) : (
+                            <iframe src={previewDocumentUrl} className="h-full w-full border-0 bg-white" title="Generated Document" />
+                          );
+                        })()
                       ) : (
                         <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
                           <p className="text-sm font-semibold text-slate-200">Select a document from the sidebar</p>

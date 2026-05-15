@@ -5,19 +5,21 @@ function normalizeUrlString(value) {
     return '';
   }
 
-  const trimmed = value.trim();
+  let trimmed = value.trim();
   if (!trimmed) {
     return '';
   }
 
-  const listMatch = trimmed.match(/^\[\s*['\"](.+?)['\"]\s*\]$/);
-  const unwrapped = listMatch ? listMatch[1] : trimmed;
+  const listMatch = trimmed.match(/^\[\s*['"](.+?)['"]\s*\]$/);
+  if (listMatch) trimmed = listMatch[1];
+  
+  trimmed = trimmed.replace(/^['"\[]+|['"\]]+$/g, '');
 
-  if (/^https?:\/(?!\/)/i.test(unwrapped)) {
-    return unwrapped.replace(/^https?:\/(?!\/)/i, (prefix) => `${prefix}/`);
+  if (/^https?:\/(?!\/)/i.test(trimmed)) {
+    return trimmed.replace(/^https?:\/(?!\/)/i, (prefix) => `${prefix}/`);
   }
 
-  return unwrapped;
+  return trimmed;
 }
 
 function resolveSourceUrl(url) {

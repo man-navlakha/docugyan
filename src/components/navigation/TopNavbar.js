@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import BrandLogo from '@/components/BrandLogo';
-import { LOCAL_STORAGE_KEYS, clearStoredProcessState, fetchDocuProcessList, fetchUserProfile } from '@/lib/api/docuApi';
+import { LOCAL_STORAGE_KEYS, clearStoredProcessState, fetchDocuProcessList, fetchUserProfile, logout } from '@/lib/api/docuApi';
 
 function toStatusColor(status) {
   const normalized = (status || "").toLowerCase();
@@ -123,10 +123,7 @@ export default function TopNavbar() {
 
     setLoggingOut(true);
     try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-      });
+      await logout();
       clearStoredProcessState();
       window.localStorage.removeItem(LOCAL_STORAGE_KEYS.userUuid);
     } finally {

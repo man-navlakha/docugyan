@@ -14,7 +14,7 @@ function splitSetCookieHeader(setCookieHeader) {
   return setCookieHeader.split(/,(?=\s*[A-Za-z0-9_-]+=)/g);
 }
 
-function getSetCookieValues(response) {
+export function getSetCookieValues(response) {
   if (typeof response.headers.getSetCookie === "function") {
     return response.headers.getSetCookie();
   }
@@ -23,7 +23,7 @@ function getSetCookieValues(response) {
   return splitSetCookieHeader(setCookie);
 }
 
-function pickCookieValue(setCookieValues, cookieName) {
+export function pickCookieValue(setCookieValues, cookieName) {
   for (const setCookieValue of setCookieValues) {
     const match = setCookieValue.match(new RegExp(`(?:^|\\s)${cookieName}=([^;]+)`));
     if (match?.[1]) {
