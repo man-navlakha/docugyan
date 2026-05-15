@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { Suspense, useEffect, useMemo, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchDocuProcessList, LOCAL_STORAGE_KEYS, deleteDocuProcess, fetchChatSessionList, fetchChatSessionDetails, buildChatWebSocketUrl, fetchWsToken, fetchUserProfile, deleteChatSession, fetchDocuProcessData } from "@/lib/api/docuApi";
 import ReactMarkdown from 'react-markdown';
@@ -1913,7 +1913,7 @@ function ChatSession({ projectId }) {
   );
 }
 
-export default function ChatPage() {
+function ChatPageContent() {
   const searchParams = useSearchParams();
   const projectId = searchParams?.get("project");
 
@@ -1922,4 +1922,21 @@ export default function ChatPage() {
   }
 
   return <ChatList />;
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-[#0a0a0c]">
+          <div className="flex items-center gap-3 text-sm text-slate-300">
+            <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-500 border-t-white" />
+            Loading chat...
+          </div>
+        </div>
+      }
+    >
+      <ChatPageContent />
+    </Suspense>
+  );
 }

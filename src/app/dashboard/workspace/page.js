@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import ReactFlow, { Background, BaseEdge, Controls, Handle, MarkerType, Position, getBezierPath } from "reactflow";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
@@ -2184,7 +2184,7 @@ const InlineReferences = ({ references }) => {
   );
 };
 
-export default function WorkspacePage() {
+function WorkspaceContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -4014,5 +4014,22 @@ export default function WorkspacePage() {
         }
       `}</style>
     </main>
+  );
+}
+
+export default function WorkspacePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-[#0a0a0c]">
+          <div className="flex items-center gap-3 text-sm text-slate-300">
+            <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-500 border-t-white" />
+            Loading workspace...
+          </div>
+        </div>
+      }
+    >
+      <WorkspaceContent />
+    </Suspense>
   );
 }

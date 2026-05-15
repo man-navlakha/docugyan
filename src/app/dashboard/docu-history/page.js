@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchDocuProcessList, LOCAL_STORAGE_KEYS, deleteDocuProcess } from "@/lib/api/docuApi";
 
@@ -77,7 +77,7 @@ function toStatusColor(status) {
   return "bg-slate-500";
 }
 
-export default function DocuHistoryPage() {
+function DocuHistoryContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -377,5 +377,22 @@ export default function DocuHistoryPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function DocuHistoryPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-[#0a0a0c]">
+          <div className="flex items-center gap-3 text-sm text-slate-300">
+            <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-500 border-t-white" />
+            Loading history...
+          </div>
+        </div>
+      }
+    >
+      <DocuHistoryContent />
+    </Suspense>
   );
 }
